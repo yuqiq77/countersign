@@ -9,6 +9,7 @@ ADRs capture decisions that constrain implementation. They are append-only decis
 | [ADR-003](003-separate-three-kinds-of-truth.md) | Separate source facts, model assessments, and human decisions | Accepted |
 | [ADR-004](004-central-capability-registry.md) | Govern external calls through a central capability registry | Accepted |
 | [ADR-005](005-official-source-authority.md) | Official-source authority and stale-job policy | Accepted |
+| [ADR-011](011-bounded-company-research-loop.md) | Bounded company-research loop activates model-invoked capabilities | Accepted |
 
 The implementation baseline is [Architecture v4](../job-search-agent-architecture-v4.md).
 
