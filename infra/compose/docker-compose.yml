@@ -1,0 +1,106 @@
+# Core profile: 6 app-facing containers + a one-shot migrate job (v4 §7).
+# Telemetry is an opt-in profile added in Slice 2.
+
+name: countersign
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: countersign
+      POSTGRES_PASSWORD: countersign
+      POSTGRES_DB: countersign
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U countersign"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    environment:
+      DB: postgres12
+      POSTGRES_USER: countersign
+      POSTGRES_PWD: countersign
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8080:8080"
+    depends_on:
+      - temporal
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      COUNTERSIGN_DATABASE_URL: postgresql+psycopg://countersign:countersign@postgres:5432/countersign
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      COUNTERSIGN_DATABASE_URL: postgresql+psycopg://countersign:countersign@postgres:5432/countersign
+      COUNTERSIGN_TEMPORAL_ADDRESS: temporal:7233
+      COUNTERSIGN_CORS_ORIGINS: ${COUNTERSIGN_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: ["python", "-m", "countersign.worker"]
+    environment:
+      COUNTERSIGN_DATABASE_URL: postgresql+psycopg://countersign:countersign@postgres:5432/countersign
+      COUNTERSIGN_TEMPORAL_ADDRESS: temporal:7233
+      COUNTERSIGN_MODEL_PROVIDER: ${COUNTERSIGN_MODEL_PROVIDER:-fake}
+      COUNTERSIGN_MODEL_ID: ${COUNTERSIGN_MODEL_ID:-claude-opus-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Inlined into the client bundle at build time (see apps/web/Dockerfile);
+        # a runtime environment value would be silently ignored.
+        NEXT_PUBLIC_API_BASE_URL: ${COUNTERSIGN_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

@@ -2,7 +2,7 @@
 
 A production-oriented, single-user agentic workflow system for collecting, verifying, evaluating, and approving external job intelligence.
 
-The implementation baseline is [Architecture v4](docs/job-search-agent-architecture-v4.md). The project is currently in **Slice 0: contracts and skeleton**; runtime features described by the architecture are not claimed until their code, tests, and telemetry exist.
+The implementation baseline is [Architecture v4](docs/job-search-agent-architecture-v4.md). The project is currently in **Slice 1: one durable case**; runtime features described by the architecture are not claimed until their code, tests, and telemetry exist.
 
 ## Architecture at a glance
 
@@ -56,20 +56,46 @@ pnpm --dir apps/web typecheck
 pnpm --dir apps/web build
 ```
 
+## Running locally
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up --build
+```
+
+This starts PostgreSQL, self-hosted Temporal (+ UI on :8080), a one-shot
+Alembic migration, the API (:8000), the worker, and the web UI (:3000).
+The worker defaults to the deterministic fake model; set
+`COUNTERSIGN_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` for live
+evaluations.
+
+Crash-recovery demo: create a case from the web UI, `docker compose kill
+worker` mid-pipeline, `docker compose start worker`, and watch the case
+resume with no duplicate snapshot, evaluation, or audit event.
+
 ## Current scope
 
-Implemented in this skeleton:
+Implemented (Slice 1 — one durable case):
 
-- accepted ADR-001 through ADR-005;
-- Python and web package boundaries;
-- strict base contracts and canonical source/status enums;
-- minimal FastAPI health endpoint;
-- import-linter rules expressing the deterministic workflow boundary;
-- test/eval/infrastructure directory ownership.
+- paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
+- `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
+  durable approval Signal wait, with quarantine/closed/expiry paths;
+- SSRF-guarded fetch, deterministic HTML normalization, authority-aware
+  official-status verification (never inferred from HTTP 200 alone);
+- thin model gateway: structured output against the Pydantic contract,
+  bounded schema-repair retry, token/latency/version capture; deterministic
+  fake provider for tests and model-free runs;
+- deterministic compensation signal computed from extracted salary data —
+  never by the model;
+- idempotent persistence (deterministic IDs, dedup constraints, converged
+  retries) with append-only audit events in the same transaction;
+- Alembic migrations, Compose core profile, CI (ruff, pyright,
+  import-linter, pytest, web typecheck/build);
+- workflow tests under Temporal's time-skipping environment, including an
+  end-to-end run with real Activities and a duplicate-delivery test.
 
-Not implemented yet:
+Not implemented yet (Slice 2+):
 
-- the Job Intelligence Workflow or Activities;
-- persistence models and migrations;
-- external source adapters and model calls;
-- authorization, audit, observability, or deployed infrastructure.
+- watchlist + ATS adapters, scheduled scans and rechecks, capability
+  registry policy enforcement, prompt/policy version registry;
+- authorization, failure inbox UI, OTel traces and cost dashboard;
+- golden evals, calibration, policy promotion.

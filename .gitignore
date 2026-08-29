@@ -45,6 +45,7 @@ test-results/
 # local agent state
 .codex/
 .claude/
+CLAUDE.md
 
 # TypeScript incremental build info
 *.tsbuildinfo
@@ -55,3 +56,4 @@ docs/private/
 config/operator/
 data/operator/
 jobagent-private/
+HANDOFF.md

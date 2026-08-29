@@ -1,0 +1,32 @@
+# Keep Docker build contexts intentionally smaller than the Git working tree.
+# Both Dockerfiles use the repository root as their context, so allow only the
+# files they COPY and exclude local/private material by default.
+**
+
+# Root Python image inputs.
+!.dockerignore
+!Dockerfile
+!pyproject.toml
+!README.md
+!alembic.ini
+!src/
+!src/**
+!migrations/
+!migrations/**
+
+# Web image inputs.
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
+!apps/
+!apps/web/
+!apps/web/**
+
+# Generated files can exist below otherwise-allowed source directories.
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/node_modules/
+**/.next/
+**/*.tsbuildinfo
+**/.DS_Store
