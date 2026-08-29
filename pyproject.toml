@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "countersign"
+version = "0.1.0"
+description = "Durable, human-governed job intelligence workflows"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.14,<2",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
+  "temporalio>=1.9,<2",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "import-linter>=2.1,<3",
+  "pyright>=1.1,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<2",
+  "ruff>=0.9,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/countersign"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.importlinter]
+root_packages = ["countersign"]
+
+[[tool.importlinter.contracts]]
+name = "Contracts do not depend on application internals"
+type = "forbidden"
+source_modules = ["countersign.contracts"]
+forbidden_modules = [
+  "countersign.activities",
+  "countersign.api",
+  "countersign.capabilities",
+  "countersign.domain",
+  "countersign.gateway",
+  "countersign.persistence",
+  "countersign.policy",
+  "countersign.telemetry",
+  "countersign.workflows",
+]
+
+[[tool.importlinter.contracts]]
+name = "Temporal workflows stay deterministic"
+type = "forbidden"
+source_modules = ["countersign.workflows"]
+forbidden_modules = [
+  "countersign.activities",
+  "countersign.api",
+  "countersign.capabilities",
+  "countersign.gateway",
+  "countersign.persistence",
+  "countersign.policy",
+  "countersign.telemetry",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain remains pure"
+type = "forbidden"
+source_modules = ["countersign.domain"]
+forbidden_modules = [
+  "countersign.activities",
+  "countersign.api",
+  "countersign.capabilities",
+  "countersign.gateway",
+  "countersign.persistence",
+  "countersign.policy",
+  "countersign.telemetry",
+  "countersign.worker",
+  "countersign.workflows",
+]

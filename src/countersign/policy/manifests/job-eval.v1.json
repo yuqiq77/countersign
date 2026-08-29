@@ -1,0 +1,20 @@
+{
+  "manifest_schema_version": 1,
+  "policy_id": "job-eval",
+  "version": "1.0.0-draft",
+  "status": "DRAFT",
+  "candidate_profile_version": "candidate-profile/1.0.0-draft",
+  "role_taxonomy_version": "role-taxonomy/1.0.0-draft",
+  "search_policy_version": "search-policy/1.0.0-draft",
+  "verification_policy_version": "verification-policy/1.0.0-draft",
+  "evaluation_rubric_version": "default-rubric/1.0.0-draft",
+  "decision_threshold_version": "decision-thresholds/1.0.0-draft",
+  "evidence_catalog_version": "candidate-evidence/1.0.0-draft",
+  "prompt_versions": {
+    "evaluator": "evaluator/1.0.0-draft",
+    "second_opinion": "second-opinion/1.0.0-draft",
+    "cross_examination": "cross-examination/1.0.0-draft"
+  },
+  "model_route_version": "model-routes/1.0.0-draft"
+}
+

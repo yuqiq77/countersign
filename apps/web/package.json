@@ -1,0 +1,24 @@
+{
+  "name": "@countersign/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "next": ">=16 <17",
+    "react": ">=19 <20",
+    "react-dom": ">=19 <20"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": ">=4 <5",
+    "@types/node": ">=22 <25",
+    "@types/react": ">=19 <20",
+    "@types/react-dom": ">=19 <20",
+    "tailwindcss": ">=4 <5",
+    "typescript": ">=5.7 <6"
+  }
+}

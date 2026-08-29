@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Virtual env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Generated output
+out/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# node modules
+node_modules/
+.pnpm-store/
+.next/
+coverage/
+playwright-report/
+test-results/
+
+# Local infrastructure state
+.temporal/
+
+# local agent state
+.codex/
+.claude/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Operator-confidential material (Architecture v4 §21) — kept outside this repository
+docs/job-agent-base-prompt.md
+docs/private/
+config/operator/
+data/operator/
+jobagent-private/
