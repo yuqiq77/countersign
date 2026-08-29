@@ -1,13 +1,92 @@
 """Versioned contracts shared across API, workflows, Activities, and persistence."""
 
-from countersign.contracts.base import ContractModel
-from countersign.contracts.enums import InvocationSource, JobStatus, SourceAuthority
+from countersign.contracts.base import ContractModel, JsonBoundaryModel
+from countersign.contracts.cases import (
+    ApprovalDecisionRequest,
+    ApprovalDecisionResponse,
+    ApprovalRequestView,
+    CaseDetail,
+    CaseSummary,
+    CreateCaseRequest,
+    CreateCaseResponse,
+)
+from countersign.contracts.enums import (
+    ActorType,
+    ApprovalDecision,
+    ApprovalRequestStatus,
+    CaseState,
+    CompensationSignal,
+    EvalDecision,
+    InvocationSource,
+    JobStatus,
+    Relevance,
+    SeniorityFit,
+    Severity,
+    SourceAuthority,
+)
+from countersign.contracts.evaluation import (
+    DistinctiveAsset,
+    EvaluationRecord,
+    HardBlocker,
+    ModelEvaluation,
+    ModelUsage,
+    RiskFlag,
+    SalaryExtraction,
+)
 from countersign.contracts.health import HealthResponse
+from countersign.contracts.provenance import SnapshotRecord
+from countersign.contracts.verification import VerificationResult
+from countersign.contracts.workflow_io import (
+    ApprovalRequestOutcome,
+    CaseWorkflowInput,
+    CaseWorkflowResult,
+    CaseWorkflowStatus,
+    DecisionSignal,
+    EvaluateOutcome,
+    NormalizeOutcome,
+    SnapshotOutcome,
+    VerifyOutcome,
+)
 
 __all__ = [
+    "ActorType",
+    "ApprovalDecision",
+    "ApprovalDecisionRequest",
+    "ApprovalDecisionResponse",
+    "ApprovalRequestOutcome",
+    "ApprovalRequestStatus",
+    "ApprovalRequestView",
+    "CaseDetail",
+    "CaseState",
+    "CaseSummary",
+    "CaseWorkflowInput",
+    "CaseWorkflowResult",
+    "CaseWorkflowStatus",
+    "CompensationSignal",
     "ContractModel",
+    "CreateCaseRequest",
+    "CreateCaseResponse",
+    "DecisionSignal",
+    "DistinctiveAsset",
+    "EvalDecision",
+    "EvaluateOutcome",
+    "EvaluationRecord",
+    "HardBlocker",
     "HealthResponse",
     "InvocationSource",
     "JobStatus",
+    "JsonBoundaryModel",
+    "ModelEvaluation",
+    "ModelUsage",
+    "NormalizeOutcome",
+    "Relevance",
+    "RiskFlag",
+    "SalaryExtraction",
+    "SeniorityFit",
+    "Severity",
+    "SnapshotOutcome",
+    "SnapshotRecord",
     "SourceAuthority",
+    "VerificationResult",
+    "VerifyOutcome",
 ]
