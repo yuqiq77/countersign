@@ -15,5 +15,5 @@ FROM node:22-alpine
 WORKDIR /repo
 RUN corepack enable
 COPY --from=build /repo ./
-EXPOSE 3000
+EXPOSE 3001
 CMD ["pnpm", "--dir", "apps/web", "start"]

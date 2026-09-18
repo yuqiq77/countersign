@@ -62,11 +62,18 @@ pnpm --dir apps/web build
 docker compose -f infra/compose/docker-compose.yml up --build
 ```
 
-This starts PostgreSQL, self-hosted Temporal (+ UI on :8080), a one-shot
-Alembic migration, the API (:8000), the worker, and the web UI (:3000).
+This starts PostgreSQL (host port :5435), self-hosted Temporal (+ UI on
+:8080), a one-shot Alembic migration, the API (:8000), the worker, and the
+web UI (:3001).
 The worker defaults to the deterministic fake model; set
-`COUNTERSIGN_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` for live
-evaluations.
+`COUNTERSIGN_MODEL_PROVIDER=anthropic`, `COUNTERSIGN_MODEL_ID`, and
+`ANTHROPIC_API_KEY` for live evaluations. Anthropic-compatible relays can set
+`ANTHROPIC_BASE_URL`. Explicitly pass the repository-root environment file
+when starting a live evaluation stack:
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.yml up --build
+```
 
 Crash-recovery demo: create a case from the web UI, `docker compose kill
 worker` mid-pipeline, `docker compose start worker`, and watch the case

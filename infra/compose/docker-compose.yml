@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: countersign
       POSTGRES_DB: countersign
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5435:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -61,7 +61,7 @@ services:
     environment:
       COUNTERSIGN_DATABASE_URL: postgresql+psycopg://countersign:countersign@postgres:5432/countersign
       COUNTERSIGN_TEMPORAL_ADDRESS: temporal:7233
-      COUNTERSIGN_CORS_ORIGINS: ${COUNTERSIGN_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      COUNTERSIGN_CORS_ORIGINS: ${COUNTERSIGN_CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
     ports:
       - "8000:8000"
     depends_on:
@@ -82,6 +82,7 @@ services:
       COUNTERSIGN_MODEL_PROVIDER: ${COUNTERSIGN_MODEL_PROVIDER:-fake}
       COUNTERSIGN_MODEL_ID: ${COUNTERSIGN_MODEL_ID:-claude-opus-5}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -98,7 +99,7 @@ services:
         # a runtime environment value would be silently ignored.
         NEXT_PUBLIC_API_BASE_URL: ${COUNTERSIGN_PUBLIC_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
       - api
 

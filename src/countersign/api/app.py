@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from countersign.api.routes import router
 from countersign.contracts import HealthResponse
 
-_DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
+_DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 
 
 def cors_origins() -> list[str]:
