@@ -42,14 +42,20 @@ Important import boundaries: `countersign.domain` may import only `countersign.c
 
 ## Local checks
 
-The web dependency graph is pinned by `pnpm-lock.yaml`. Python currently uses bounded dependency ranges in `pyproject.toml`; Slice 1 will generate and commit `uv.lock` when `uv` is adopted as the project runner.
+The web dependency graph is pinned by `pnpm-lock.yaml`. Python dependencies
+are bounded version ranges in `pyproject.toml` with no lock file yet; pinning
+the image's dependency graph is a v4 §21 item scheduled with the deployed
+image (Slice 5). The commands below are the ones CI runs. `pytest` skips the
+PostgreSQL channel unless `COUNTERSIGN_TEST_POSTGRES_URL` points at a
+disposable database (see `tests/integration/test_postgres.py`).
 
 ```bash
-uv sync --extra dev
-uv run ruff check .
-uv run pyright
-uv run lint-imports
-uv run pytest
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/ruff check .
+.venv/bin/pyright
+.venv/bin/lint-imports
+.venv/bin/pytest
 
 pnpm install
 pnpm --dir apps/web typecheck

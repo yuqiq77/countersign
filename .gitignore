@@ -45,7 +45,6 @@ test-results/
 # local agent state
 .codex/
 .claude/
-CLAUDE.md
 
 # TypeScript incremental build info
 *.tsbuildinfo
