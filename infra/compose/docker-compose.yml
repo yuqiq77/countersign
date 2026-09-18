@@ -24,6 +24,7 @@ services:
     image: temporalio/auto-setup:1.25.2
     environment:
       DB: postgres12
+      DB_PORT: 5432
       POSTGRES_USER: countersign
       POSTGRES_PWD: countersign
       POSTGRES_SEEDS: postgres
