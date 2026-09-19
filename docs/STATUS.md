@@ -6,8 +6,8 @@ in place when any of those change; not a changelog (history: `git log`,
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-19 |
-| Branch | `main`, no remote yet. Track A runtime fixes: `a80ac12`; formatting and CI gate: `89730d4`. |
+| As of | 2026-09-20 |
+| Branch | `main`, no remote yet. Salary-policy configuration, version identity, and source stamping committed in `0ec1882`; not yet deployed. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18, worker-kill recovery repeated 2026-09-19. |
 
 ## Now
@@ -62,6 +62,29 @@ in place when any of those change; not a changelog (history: `git log`,
   events each. These historical evaluations have no provider request id;
   the start line alone does not prove that attempt 1 reached the model.
   Request-id capture is now deployed; it does not backfill prior runs.
+  **First run on the recreated stack (2026-09-19, a Lever vacancy, no
+  kill):** the worker log shows the full chain — activity start
+  (attempt 1) → `provider request` → HTTP 200 → `provider response` with a
+  `req_…` id → activity finish with the same id and usage — and the id is
+  persisted in the evaluation payload and returned by the API. Every
+  activity ran at attempt 1; 8 audit events; approval pins consistent;
+  `APPROVE` allowed (OFFICIAL_ATS + verified OPEN).
+  **Direct-API session (2026-09-19):** the owner switched
+  the worker to the official endpoint and re-ran the two Lever vacancies
+  plus one new Greenhouse vacancy. Uncached `input_tokens` for the two
+  reruns matched the relay runs exactly (1,265 and 2,456), so the relay
+  had reported usage faithfully. Prompt caching is now observed, not
+  inferred: the first direct request wrote a 2,847-token prefix and the
+  next two — different postings — read exactly 2,847, so the cached prefix
+  is the posting-independent part (system prompt + the structured-output
+  schema the API places ahead of the messages; the relay's 2,860 differed
+  by 13 tokens). The new vacancy's first evaluate attempt got a genuine
+  HTTP 500 (`api_error`, request id logged); the SDK made no retry of its
+  own (one POST — consistent with the server's `x-should-retry: false`),
+  Temporal's RetryPolicy started attempt 2 one second later and it
+  succeeded. One evaluation row, 7 audit events, no duplicates. Decisions
+  reproduced across providers: the same postings returned `APPLY_NOW` at
+  confidence 0.82/0.82 and 0.82/0.80.
 - **Open extraction gap found in the rerun:** one Ashby vacancy's static
   HTML had no visible posting text; its content lived in a JSON-LD
   `JobPosting` script block. The current normalizer skips scripts, so
@@ -71,15 +94,51 @@ in place when any of those change; not a changelog (history: `git log`,
   Scope JSON-LD extraction and a pre-model evidence sufficiency check in
   Slice 2; decide adapter coverage, the state transition, and any policy
   threshold when that work is approved.
-- The live stack includes the committed runtime fixes. Formatting changes
-  no application behavior; another recreate is not a pending step.
+- **Salary-policy fixes committed (`0ec1882`), not yet deployed:** Compose
+  now passes the four `COUNTERSIGN_SALARY_*` variables from the private
+  `.env` to the worker. Blank counts as unset; all four unset uses the
+  generic example with a startup warning. A partial set or invalid amounts
+  stops the worker before it connects. Currency is normalized; thresholds
+  must be positive and strictly ascending. Shared `countersign.env`
+  helpers preserve the existing provider configuration behavior.
+  An 8-hex fingerprint of the normalized bands enters `policy_version`
+  (`default-rubric/0.1.0+bands.<hash>`), so different bands produce distinct
+  evaluation IDs through the existing version dimension. When verification
+  is present, code overwrites the salary extraction's `source_authority`
+  and `official` fields from that authority; amount, currency, and citation
+  extraction remain model-assisted.
+  The deployment gap was missing operator configuration, not disabled
+  compensation logic: the observed EUR extractions correctly returned
+  `UNKNOWN` against USD example bands. Currency mismatches and missing
+  salary data still return `UNKNOWN`; this change adds no currency
+  conversion and does not promise a classified signal for those postings.
+- **Implementation-commit verification, 2026-09-20:** fresh detached
+  worktree and venv at `0ec1882`, Python 3.14.3, dependencies constrained to
+  the reviewed local versions. `ruff check .` clean; `ruff format --check .`
+  reports 87 files formatted; `pyright` 0 errors; `lint-imports` 3/3 kept;
+  `pytest` **93 passed, none skipped** with `COUNTERSIGN_TEST_POSTGRES_URL`
+  set to the disposable `countersign_salary_code` database in a separate
+  `postgres:16-alpine` container on `127.0.0.1:63270`. Other database
+  fixtures use isolated SQLite databases. `pnpm install --frozen-lockfile`,
+  `pnpm --dir apps/web typecheck`, and `pnpm --dir apps/web build` passed.
+  Read-only `docker compose --env-file .env.example -f
+  infra/compose/docker-compose.yml config --format json` checks confirmed
+  blank and synthetic complete salary-variable passthrough. A worker
+  subprocess with partial synthetic configuration exited 2 before
+  connecting. No model calls or live-stack changes were made.
+- **Deployment remains pending:** set all four private salary variables
+  in `.env` and recreate the whole stack with the command above when ready.
+  Existing evaluations are not rewritten or automatically re-evaluated.
 
 ## Next
 
-1. Make the repository public: run gitleaks once, inspect the tree for
+1. Keep profile loading as the next independent implementation change;
+   the private profile is prepared, but the evaluator does not yet read it
+   (scope proposal below).
+2. Make the repository public: run gitleaks once, inspect the tree for
    private identifiers (see `AGENTS.md` constraints), and have the owner
    add the remote and push.
-2. **Slice 2 — governed intelligence** (timebox 3 weeks, kill rules in v4
+3. **Slice 2 — governed intelligence** (timebox 3 weeks, kill rules in v4
    §24): watchlist as a policy artifact including company → official-domain
    mapping (this is what unlocks `OFFICIAL_COMPANY`); Greenhouse + Lever
    adapters; scan-report import; scheduled scans + stale rechecks;
@@ -88,29 +147,41 @@ in place when any of those change; not a changelog (history: `git log`,
    and evidence-sufficiency gap above when scoping tickets. Exit = Claim
    Level 1 (§25) + scheduled scans running. Tickets under `docs/tickets/`
    start here: one per workstream, cut and owner-read before code.
-3. **Slice 2.5 — company-research loop** per ADR-011, after Slice 2
+4. **Slice 2.5 — company-research loop** per ADR-011, after Slice 2
    (registry enforcement and the gateway route registry are prerequisites).
    Kill rule: the `CompanyProfile` schema ships regardless; an
    operator-filled profile is the degraded mode.
-4. v4 §15 / §24 / §29 do not yet mention the research loop. Propose that
+5. v4 §15 / §24 / §29 do not yet mention the research loop. Propose that
    edit when Slice 2.5 nears (owner-reserved).
 
 ## Waiting on the owner
 
-- **System prompt enrichment.** The evaluator's system prompt is about
-  1.3k characters and carries no operator profile, so personalized fit
-  judgments lack that evidence. Operator facts belong in
-  `config/operator/` (gitignored) and reach the prompt as policy values,
-  never as tracked text. Prompt caching requires a model-dependent minimum
-  prefix (1024 tokens on Sonnet 4.6, 512 on Opus 5); the current system
-  prompt is estimated at ~330 tokens. Stable-prefix caching has not been
-  observed in the live runs (`cache_creation_input_tokens: 0`).
-- **Usage numbers through the relay are unstable.** One run reported
-  25,732 input tokens for a prompt estimated at ~3.9k (system + posting
-  text + output schema); another reported 99 for a request whose system
-  prompt alone is estimated at ~330 tokens. Verify with direct calls
-  (`count_tokens` and one real request) before the Slice 2 cost dashboard
-  trusts `usage`, and decide whether cost accounting must bypass the relay.
+- **Private-profile loading — separate follow-up, not implemented.**
+  An operator-authored profile exists in `config/operator/profile.md`
+  (gitignored); its contents and real policy values stay out of tracked
+  files. The current evaluator still receives no candidate profile, so
+  preparing the file alone does not fix personalized fit judgments.
+  The observed unsupported engineering-profile claim and `REALISTIC`
+  seniority remain a regression case for the over-enthusiasm trap.
+  The minimal proposal is to load a private profile into the stable system
+  prefix, validate required profile input before live evaluation, and bind
+  profile revisions to evaluation identity. Loader configuration and
+  version representation are not yet implemented. A missing-profile mode
+  that still forces candidate-specific scores has not been adopted;
+  nullable scores and approval-gate changes are outside this salary fix.
+  Preserve the distinction between career preferences, demonstrated
+  evidence, and job requirements when the prompt is updated.
+- **Usage accounting: one outlier left.** The relay's numbers turned out
+  faithful (identical uncached counts to the direct API for identical
+  postings), and the "99 input tokens" reading was a misread here —
+  `input_tokens` is the uncached remainder; that run had 2,860 cached
+  tokens beside it, and an empty posting body explains the small
+  remainder. The first run's 25,732 with zero cache activity remains
+  unexplained and has not recurred; the relay stays in use alongside the
+  direct API for cross-checks during development, so watch for it. For
+  the Slice 2 cost dashboard: cost = `input_tokens` + cache writes at the
+  write premium + cache reads at the read rate + `output_tokens`; never
+  the single field.
 
 ## Recently done (pointers only)
 
@@ -118,4 +189,5 @@ Slice 1 commit series + ADR-011 (`git log b87cb11..44f54da`); delivery and
 working-agreement updates (`git log 44f54da..a79236c`); Track A follow-up
 code and tests (`a80ac12`), deployment verification, and the repeated
 worker-kill recovery check (2026-09-19); formatting cleanup and CI gate
-(`89730d4`).
+(`89730d4`); salary-policy fixes and isolated implementation-commit
+verification (`0ec1882`, 2026-09-20).
