@@ -89,6 +89,9 @@ class ModelUsage(ContractModel):
     cache_creation_input_tokens: int
     latency_ms: int
     repair_attempts: int
+    # Vendor-side request id of the accepted response, when the SDK exposes
+    # one; the evidence that this evaluation's request reached the provider.
+    provider_request_id: str | None = None
 
 
 class EvaluationRecord(ContractModel):

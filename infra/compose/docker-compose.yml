@@ -1,5 +1,6 @@
 # Core profile: 6 app-facing containers + a one-shot migrate job (v4 §7).
 # Telemetry is an opt-in profile added in Slice 2.
+# Every published port binds to loopback: nothing here has authentication.
 
 name: countersign
 
@@ -29,7 +30,7 @@ services:
       POSTGRES_PWD: countersign
       POSTGRES_SEEDS: postgres
     ports:
-      - "7233:7233"
+      - "127.0.0.1:7233:7233"
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,7 +41,7 @@ services:
     environment:
       TEMPORAL_ADDRESS: temporal:7233
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       - temporal
 
@@ -64,7 +65,7 @@ services:
       COUNTERSIGN_TEMPORAL_ADDRESS: temporal:7233
       COUNTERSIGN_CORS_ORIGINS: ${COUNTERSIGN_CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,6 +84,7 @@ services:
       COUNTERSIGN_MODEL_PROVIDER: ${COUNTERSIGN_MODEL_PROVIDER:-fake}
       COUNTERSIGN_MODEL_ID: ${COUNTERSIGN_MODEL_ID:-claude-opus-5}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # A blank base URL is treated as unset by the gateway.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
     depends_on:
       migrate:
@@ -100,7 +102,7 @@ services:
         # a runtime environment value would be silently ignored.
         NEXT_PUBLIC_API_BASE_URL: ${COUNTERSIGN_PUBLIC_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     depends_on:
       - api
 

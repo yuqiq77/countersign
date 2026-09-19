@@ -6,6 +6,7 @@ code from the model's salary extraction — never by the model (v4 §14).
 """
 
 import hashlib
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -21,11 +22,14 @@ from countersign.gateway.provider import (
     GatewayError,
     ProviderRefusal,
     ProviderResponse,
+    optional_env,
 )
 
 PROMPT_VERSION = "evaluator/0.1.0"
 POLICY_VERSION = "default-rubric/0.1.0"
 DEFAULT_MODEL_ROUTE = "reasoning-standard"
+
+_log = logging.getLogger(__name__)
 
 _MAX_TEXT_CHARS = 24_000
 
@@ -143,7 +147,19 @@ def run_evaluation(
                 f"{user}\n\nYour previous output failed contract validation "
                 f"({last_error}). Return output that satisfies the schema exactly."
             )
+            _log.info(
+                "provider request: case=%s route=%s repair_attempt=%d",
+                case_id,
+                cfg.model_route,
+                attempt,
+            )
             response = provider.evaluate(system=system, user=prompt)
+            _log.info(
+                "provider response: case=%s request_id=%s model=%s",
+                case_id,
+                response.request_id,
+                response.model_id,
+            )
             break
         except ProviderRefusal:
             raise
@@ -173,18 +189,21 @@ def run_evaluation(
             cache_creation_input_tokens=response.cache_creation_input_tokens,
             latency_ms=latency_ms,
             repair_attempts=repair_attempts,
+            provider_request_id=response.request_id,
         ),
     )
 
 
 @lru_cache(maxsize=4)
-def _provider_for(provider_name: str, model_id: str | None) -> EvaluationProvider:
+def _provider_for(
+    provider_name: str, model_id: str | None, base_url: str | None
+) -> EvaluationProvider:
     """One long-lived provider (and SDK client) per configuration."""
 
     if provider_name == "anthropic":
         from countersign.gateway.anthropic_provider import AnthropicProvider
 
-        return AnthropicProvider(model_id or "claude-opus-5")
+        return AnthropicProvider(model_id or "claude-opus-5", base_url=base_url)
     from countersign.gateway.fake_provider import FakeEvaluationProvider
 
     return FakeEvaluationProvider()
@@ -199,9 +218,10 @@ def resolve_provider() -> EvaluationProvider:
     """
 
     provider_name = os.environ.get("COUNTERSIGN_MODEL_PROVIDER", "fake").lower()
-    model_id = (
-        os.environ.get("COUNTERSIGN_MODEL_ID", "claude-opus-5")
-        if provider_name == "anthropic"
-        else None
+    if provider_name != "anthropic":
+        return _provider_for(provider_name, None, None)
+    return _provider_for(
+        provider_name,
+        optional_env("COUNTERSIGN_MODEL_ID") or "claude-opus-5",
+        optional_env("ANTHROPIC_BASE_URL"),
     )
-    return _provider_for(provider_name, model_id)

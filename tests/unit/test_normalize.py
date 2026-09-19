@@ -73,3 +73,21 @@ def test_unknown_hosts_never_reach_official_authority() -> None:
         "https://acme.com/careers/roles/1",
     ):
         assert classify_authority(url) == SourceAuthority.COMPANY_CONTROLLED, url
+
+
+def test_og_title_wins_over_placeholder_title_tag() -> None:
+    """An ATS page was observed serving `<title>page_title</title>` on one
+    response and the real title a second later; `og:title` was right both
+    times, so it takes precedence. The text hash is unaffected either way."""
+
+    placeholder = b"""
+    <html><head>
+      <title>page_title</title>
+      <meta property="og:title" content="Research Engineer" />
+    </head><body><p>Build reliable systems.</p></body></html>
+    """
+    real = placeholder.replace(b"page_title", b"Job Application for Research Engineer")
+    assert normalize_html(placeholder).title == "Research Engineer"
+    assert normalize_html(real).title == "Research Engineer"
+    assert normalize_html(placeholder).content_hash == normalize_html(real).content_hash
+    assert normalize_html(HTML).title == "Senior Engineer - ExampleCorp"

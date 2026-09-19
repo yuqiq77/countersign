@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from countersign.contracts.enums import SourceAuthority
 
 EXTRACTOR_NAME = "html-text"
-EXTRACTOR_VERSION = "1.0.0"
+EXTRACTOR_VERSION = "1.1.0"
 
 _SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "head"})
 
@@ -52,6 +52,7 @@ class _TextExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.chunks: list[str] = []
         self.title_parts: list[str] = []
+        self.og_title: str | None = None
         self.site_name: str | None = None
         self._skip_depth = 0
         self._in_title = False
@@ -63,10 +64,11 @@ class _TextExtractor(HTMLParser):
             self._in_title = True
         if tag == "meta":
             attributes = dict(attrs)
-            if attributes.get("property") == "og:site_name":
-                content = attributes.get("content")
-                if content:
-                    self.site_name = content.strip()
+            content = (attributes.get("content") or "").strip()
+            if content and attributes.get("property") == "og:site_name":
+                self.site_name = content
+            if content and attributes.get("property") == "og:title":
+                self.og_title = content
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP_TAGS and self._skip_depth > 0:
@@ -97,14 +99,20 @@ class Normalized:
 
 
 def normalize_html(body: bytes) -> Normalized:
-    """Extract title, site hint, and visible text; hash the normalized text."""
+    """Extract title, site hint, and visible text; hash the normalized text.
+
+    The title prefers `og:title` over `<title>`: an ATS page has been
+    observed serving a placeholder `<title>` (literally "page_title") on
+    one response and the real one a second later, while `og:title` carried
+    the posting title both times. The text hash never includes the title.
+    """
 
     html = body.decode("utf-8", errors="replace")
     extractor = _TextExtractor()
     extractor.feed(html)
     text = "\n".join(extractor.chunks)
     lowered = text.lower()
-    title = "".join(extractor.title_parts).strip() or None
+    title = extractor.og_title or "".join(extractor.title_parts).strip() or None
     return Normalized(
         title=title,
         company_hint=extractor.site_name,

@@ -7,6 +7,7 @@ import { createCase, listCases, type CaseSummary } from "../lib/api";
 
 export default function HomePage() {
   const [cases, setCases] = useState<CaseSummary[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +19,7 @@ export default function HomePage() {
     if (document.hidden) return;
     try {
       setCases(await listCases());
+      setLoaded(true);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -112,7 +114,7 @@ export default function HomePage() {
               </td>
             </tr>
           ))}
-          {cases.length === 0 ? (
+          {loaded && cases.length === 0 ? (
             <tr>
               <td colSpan={4} className="py-8 text-center text-neutral-500">
                 No cases yet.

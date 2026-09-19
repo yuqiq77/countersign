@@ -261,6 +261,9 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
         title = case.title if case is not None else None
     normalized = normalize_html(body)
 
+    # Marks the activity attempt only; the provider-boundary lines live in
+    # the gateway, and the request id below is the evidence a request landed.
+    activity.logger.info("evaluate: start for %s", payload.case_id)
     try:
         record = run_evaluation(
             resolve_provider(),
@@ -275,6 +278,19 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
         )
     except (ContractFailure, ProviderRefusal) as exc:
         raise ApplicationError(str(exc), type="ContractFailure", non_retryable=True) from exc
+    usage = record.usage
+    activity.logger.info(
+        "evaluate: %s request_id=%s model=%s in=%d out=%d cache_read=%d "
+        "latency_ms=%d repairs=%d",
+        record.evaluation_id,
+        usage.provider_request_id,
+        usage.model_id,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_read_input_tokens,
+        usage.latency_ms,
+        usage.repair_attempts,
+    )
 
     with session_scope() as session:
         repo.record_evaluation(session, record)

@@ -6,19 +6,44 @@ parsed result client-side. The stable system prompt is cached (v4 §13.2).
 """
 
 from countersign.contracts.evaluation import ModelEvaluation
-from countersign.gateway.provider import ContractFailure, ProviderRefusal, ProviderResponse
+from countersign.gateway.provider import (
+    ContractFailure,
+    ProviderRefusal,
+    ProviderResponse,
+    clear_blank_env,
+)
 
 _MAX_TOKENS = 16000
 
 
-class AnthropicProvider:
-    """Evaluation provider on the Anthropic API (one route, one model)."""
+def request_id_of(response: object) -> str | None:
+    """The SDK's `_request_id` (documented on every response), or None."""
 
-    def __init__(self, model_id: str) -> None:
+    value = getattr(response, "_request_id", None)
+    return value if isinstance(value, str) else None
+
+
+class AnthropicProvider:
+    """Evaluation provider on the Anthropic API (one route, one model).
+
+    The base URL follows the SDK's own chain — `base_url` argument, then
+    `ANTHROPIC_BASE_URL`, then the CLI profile, then the default — with one
+    correction: a blank `ANTHROPIC_BASE_URL` (Compose's `${VAR:-}`) would
+    count as explicit inside the SDK and become an empty base URL, so it
+    is cleared first. Credentials stay entirely with the SDK (API key,
+    auth token, CLI profile).
+    """
+
+    def __init__(self, model_id: str, *, base_url: str | None = None) -> None:
         import anthropic
 
-        self._client = anthropic.Anthropic()
+        clear_blank_env("ANTHROPIC_BASE_URL")
+        self._client = anthropic.Anthropic(base_url=base_url)
         self._model_id = model_id
+
+    @property
+    def base_url(self) -> str:
+        return str(self._client.base_url)
 
     def evaluate(self, *, system: str, user: str) -> ProviderResponse:
         response = self._client.messages.parse(
@@ -49,4 +74,5 @@ class AnthropicProvider:
             output_tokens=usage.output_tokens,
             cache_read_input_tokens=usage.cache_read_input_tokens or 0,
             cache_creation_input_tokens=usage.cache_creation_input_tokens or 0,
+            request_id=request_id_of(response),
         )
