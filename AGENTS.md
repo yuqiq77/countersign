@@ -108,8 +108,8 @@ them.
   re-confirmation.
 - **Verification is reported as run**: name the command, the database it
   ran against, and the actual counts; if something was skipped, say so. The
-  local commands are the CI ones: `ruff check .`, `pyright`,
-  `lint-imports`, `pytest`, `pnpm --dir apps/web typecheck`,
+  local commands are the CI ones: `ruff check .`, `ruff format --check .`,
+  `pyright`, `lint-imports`, `pytest`, `pnpm --dir apps/web typecheck`,
   `pnpm --dir apps/web build`. A layered commit series is verified per
   commit (fresh worktree and venv at each point), the standard Slice 1 set.
 

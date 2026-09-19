@@ -7,7 +7,7 @@ in place when any of those change; not a changelog (history: `git log`,
 | Field | Value |
 | --- | --- |
 | As of | 2026-09-19 |
-| Branch | `main`, no remote yet. Track A follow-up code and tests: `a80ac12`; accompanying documentation synchronized. |
+| Branch | `main`, no remote yet. Track A runtime fixes: `a80ac12`; formatting and CI gate: `89730d4`. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18, worker-kill recovery repeated 2026-09-19. |
 
 ## Now
@@ -22,23 +22,25 @@ in place when any of those change; not a changelog (history: `git log`,
   Compose host ports bind to loopback; the web list waits for its first
   successful load before showing "No cases yet." Configuration and title
   regressions are covered by tests.
-- **Code-commit verification, 2026-09-19:** fresh detached worktree and
-  venv at `a80ac12` (Python 3.14.3, dependency versions reproduced from the
-  reviewed environment). `ruff check .` clean · `pyright` 0 errors ·
-  `lint-imports` 3/3 kept · `pytest` 85 passed with
-  `COUNTERSIGN_TEST_POSTGRES_URL` pointing at the disposable
-  `countersign_code_verify` database in a separate `postgres:16-alpine`
-  container on `127.0.0.1:58021`. Other database fixtures use isolated
+- **Formatting cleanup committed (`89730d4`):** Ruff 0.16.1 reformatted
+  20 Python files with no AST changes from the pre-format sources. The
+  development dependency is pinned to that version, and CI includes
+  `ruff format --check .`. README and AGENTS list the same check.
+- **Formatting-commit verification, 2026-09-19:** fresh detached worktree
+  and venv at `89730d4` (Python 3.14.3, reviewed dependency versions).
+  `ruff check .` clean · `ruff format --check .` reports all 85 files
+  formatted · `pyright` 0 errors · `lint-imports` 3/3 kept · `pytest`
+  85 passed with `COUNTERSIGN_TEST_POSTGRES_URL` pointing at the disposable
+  `countersign_format_commit` database in a separate `postgres:16-alpine`
+  container on `127.0.0.1:59156`. Other database fixtures use isolated
   SQLite databases. `pnpm --dir apps/web typecheck` and
   `pnpm --dir apps/web build` both passed after a frozen-lockfile install.
-  `ruff format --check .` reports 20 files needing formatting and 65
-  already formatted; formatting is outside the current CI gates and has
-  its own next action below.
+  The live Compose stack was unchanged.
 - **Compose has been recreated; current deployment checked 2026-09-19:**
   PostgreSQL `:5435`, Temporal `:7233`, Temporal UI `:8080`, API `:8000`,
   and web `:3001` all publish on `127.0.0.1`. API `/healthz`, web, and
   Temporal UI returned HTTP 200. The running worker's seven changed Python
-  modules match the committed source byte-for-byte, including the
+  modules matched `a80ac12` byte-for-byte, including the
   provider-request-id changes. Future updates should recreate the whole
   stack with `docker compose --env-file .env -f
   infra/compose/docker-compose.yml up --build -d`: the earlier service-only
@@ -69,20 +71,15 @@ in place when any of those change; not a changelog (history: `git log`,
   Scope JSON-LD extraction and a pre-model evidence sufficiency check in
   Slice 2; decide adapter coverage, the state transition, and any policy
   threshold when that work is approved.
-- No implementation is currently in progress. The live stack includes the
-  committed runtime fixes; another recreate is not a pending step.
+- The live stack includes the committed runtime fixes. Formatting changes
+  no application behavior; another recreate is not a pending step.
 
 ## Next
 
-1. **Formatting, standalone commit:** run `ruff format .` and add
-   `ruff format --check .` to CI in the same commit. HEAD before this set
-   and the current tree have the same 20 unformatted files, though a new
-   logging line also needs reflow. Keep this cleanup separate from the
-   functional fixes and rerun the normal verification gates.
-2. Make the repository public: run gitleaks once, inspect the tree for
+1. Make the repository public: run gitleaks once, inspect the tree for
    private identifiers (see `AGENTS.md` constraints), and have the owner
    add the remote and push.
-3. **Slice 2 — governed intelligence** (timebox 3 weeks, kill rules in v4
+2. **Slice 2 — governed intelligence** (timebox 3 weeks, kill rules in v4
    §24): watchlist as a policy artifact including company → official-domain
    mapping (this is what unlocks `OFFICIAL_COMPANY`); Greenhouse + Lever
    adapters; scan-report import; scheduled scans + stale rechecks;
@@ -91,11 +88,11 @@ in place when any of those change; not a changelog (history: `git log`,
    and evidence-sufficiency gap above when scoping tickets. Exit = Claim
    Level 1 (§25) + scheduled scans running. Tickets under `docs/tickets/`
    start here: one per workstream, cut and owner-read before code.
-4. **Slice 2.5 — company-research loop** per ADR-011, after Slice 2
+3. **Slice 2.5 — company-research loop** per ADR-011, after Slice 2
    (registry enforcement and the gateway route registry are prerequisites).
    Kill rule: the `CompanyProfile` schema ships regardless; an
    operator-filled profile is the degraded mode.
-5. v4 §15 / §24 / §29 do not yet mention the research loop. Propose that
+4. v4 §15 / §24 / §29 do not yet mention the research loop. Propose that
    edit when Slice 2.5 nears (owner-reserved).
 
 ## Waiting on the owner
@@ -120,4 +117,5 @@ in place when any of those change; not a changelog (history: `git log`,
 Slice 1 commit series + ADR-011 (`git log b87cb11..44f54da`); delivery and
 working-agreement updates (`git log 44f54da..a79236c`); Track A follow-up
 code and tests (`a80ac12`), deployment verification, and the repeated
-worker-kill recovery check (2026-09-19).
+worker-kill recovery check (2026-09-19); formatting cleanup and CI gate
+(`89730d4`).
