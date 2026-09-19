@@ -14,6 +14,12 @@ _OFFICIAL_AUTHORITIES = (
 )
 
 
+def is_official_authority(authority: SourceAuthority) -> bool:
+    """Only official tiers may carry the apply-now framing or an official salary."""
+
+    return authority in _OFFICIAL_AUTHORITIES
+
+
 def classify_job_status(
     *,
     http_status: int,

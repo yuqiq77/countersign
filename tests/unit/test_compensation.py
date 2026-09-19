@@ -50,3 +50,16 @@ def test_band_mapping() -> None:
 def test_uses_highest_stated_amount() -> None:
     result = compute_compensation_signal(extraction(min_amount=80_000, max_amount=125_000), BANDS)
     assert result == CompensationSignal.ATTRACTIVE
+
+
+def test_bands_enforce_currency_case_and_threshold_order() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="upper-case"):
+        SalaryBands(currency="usd", transition_min=1, acceptable_min=2, attractive_min=3)
+    with pytest.raises(ValueError, match="ascend"):
+        SalaryBands(
+            currency="USD", transition_min=90_000, acceptable_min=60_000, attractive_min=120_000
+        )
+    with pytest.raises(ValueError, match="ascend"):
+        SalaryBands(currency="USD", transition_min=0, acceptable_min=1, attractive_min=2)

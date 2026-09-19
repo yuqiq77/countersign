@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.worker import Worker
 
 from countersign.activities import ALL_ACTIVITIES
+from countersign.policy.defaults import EXAMPLE_BANDS, salary_bands
 from countersign.runtime import TASK_QUEUE, connect_client
 from countersign.workflows.job_case import JobIntelligenceWorkflow
 
@@ -34,6 +35,21 @@ def run() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Policy configuration is checked once here: a malformed set of salary
+    # bands must stop the worker, not quarantine cases one evaluation at a time.
+    try:
+        bands = salary_bands()
+    except ValueError as exc:
+        _log.error("refusing to start: %s", exc)
+        raise SystemExit(2) from exc
+    if bands is EXAMPLE_BANDS:
+        _log.warning(
+            "salary bands: operator bands not configured; using the generic %s example, "
+            "so postings in other currencies get compensation_signal=UNKNOWN",
+            bands.currency,
+        )
+    else:
+        _log.info("salary bands: operator-configured, currency=%s", bands.currency)
     asyncio.run(main())
 
 

@@ -9,20 +9,21 @@ import hashlib
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from countersign.contracts.enums import JobStatus
-from countersign.contracts.evaluation import EvaluationRecord, ModelUsage
+from countersign.contracts.evaluation import EvaluationRecord, ModelEvaluation, ModelUsage
 from countersign.contracts.verification import VerificationResult
 from countersign.domain.compensation import SalaryBands, compute_compensation_signal
+from countersign.domain.verification import is_official_authority
+from countersign.env import optional_env
 from countersign.gateway.provider import (
     ContractFailure,
     EvaluationProvider,
     GatewayError,
     ProviderRefusal,
     ProviderResponse,
-    optional_env,
 )
 
 PROMPT_VERSION = "evaluator/0.1.0"
@@ -118,6 +119,29 @@ def evaluation_id_for(
     return f"eval-{case_id[:8]}-{digest[:16]}"
 
 
+def stamp_salary_source(
+    evaluation: ModelEvaluation, verification: VerificationResult | None
+) -> ModelEvaluation:
+    """Overwrite the extraction's source facts from the verification.
+
+    Where a salary came from is a source fact, not a model assessment:
+    two runs on one posting labelled it OFFICIAL_ATS and OFFICIAL_COMPANY.
+    The model keeps extracting amounts; authority and `official` come from
+    code. Without a verification the extraction is left as returned.
+    """
+
+    extraction = evaluation.salary_extraction
+    if extraction is None or verification is None:
+        return evaluation
+    stamped = extraction.model_copy(
+        update={
+            "source_authority": verification.authority,
+            "official": is_official_authority(verification.authority),
+        }
+    )
+    return evaluation.model_copy(update={"salary_extraction": stamped})
+
+
 def run_evaluation(
     provider: EvaluationProvider,
     *,
@@ -133,7 +157,12 @@ def run_evaluation(
 ) -> EvaluationRecord:
     """Produce a persisted-shape evaluation record with a bounded repair retry."""
 
-    cfg = config or EvaluatorConfig()
+    # The salary bands are policy input to this record (the compensation
+    # signal is computed from them), so their fingerprint rides in
+    # policy_version: the same posting under different bands is a different
+    # evaluation with its own id, through the existing version dimension.
+    base = config or EvaluatorConfig()
+    cfg = replace(base, policy_version=f"{base.policy_version}+bands.{bands.fingerprint()}")
     system = build_system_prompt()
     user = build_user_prompt(url=url, title=title, text=text, verification=verification)
 
@@ -174,13 +203,14 @@ def run_evaluation(
         raise ContractFailure(f"repair budget exhausted: {last_error}")
     latency_ms = int((time.monotonic() - started) * 1000)
 
-    signal = compute_compensation_signal(response.evaluation.salary_extraction, bands)
+    evaluation = stamp_salary_source(response.evaluation, verification)
+    signal = compute_compensation_signal(evaluation.salary_extraction, bands)
     return EvaluationRecord(
         evaluation_id=evaluation_id_for(
             case_id=case_id, content_hash=content_hash, generation=generation, cfg=cfg
         ),
         case_id=case_id,
-        evaluation=response.evaluation,
+        evaluation=evaluation,
         compensation_signal=signal,
         policy_version=cfg.policy_version,
         prompt_version=cfg.prompt_version,

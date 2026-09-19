@@ -6,12 +6,8 @@ parsed result client-side. The stable system prompt is cached (v4 §13.2).
 """
 
 from countersign.contracts.evaluation import ModelEvaluation
-from countersign.gateway.provider import (
-    ContractFailure,
-    ProviderRefusal,
-    ProviderResponse,
-    clear_blank_env,
-)
+from countersign.env import clear_blank_env
+from countersign.gateway.provider import ContractFailure, ProviderRefusal, ProviderResponse
 
 _MAX_TOKENS = 16000
 

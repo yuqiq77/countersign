@@ -5,6 +5,7 @@ operator-configured bands. The model never sees the bands or the
 operator's own salary.
 """
 
+import hashlib
 from dataclasses import dataclass
 
 from countersign.contracts.enums import CompensationSignal
@@ -19,6 +20,29 @@ class SalaryBands:
     transition_min: int
     acceptable_min: int
     attractive_min: int
+
+    def fingerprint(self) -> str:
+        """Short stable hash of the four normalized values (policy identity)."""
+
+        material = "|".join(
+            (
+                self.currency,
+                str(self.transition_min),
+                str(self.acceptable_min),
+                str(self.attractive_min),
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:8]
+
+    def __post_init__(self) -> None:
+        if not self.currency or self.currency != self.currency.strip().upper():
+            raise ValueError(f"currency must be a non-blank upper-case code, got {self.currency!r}")
+        if not 0 < self.transition_min < self.acceptable_min < self.attractive_min:
+            raise ValueError(
+                "thresholds must be positive and ascend: "
+                f"transition_min={self.transition_min} < acceptable_min={self.acceptable_min} "
+                f"< attractive_min={self.attractive_min}"
+            )
 
 
 def compute_compensation_signal(

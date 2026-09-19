@@ -86,6 +86,13 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # A blank base URL is treated as unset by the gateway.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # Operator salary bands: set all four in .env or none. Blank counts as
+      # unset; the worker refuses to start on a partial set and falls back to
+      # the generic USD example (with a warning) on none.
+      COUNTERSIGN_SALARY_CURRENCY: ${COUNTERSIGN_SALARY_CURRENCY:-}
+      COUNTERSIGN_SALARY_TRANSITION_MIN: ${COUNTERSIGN_SALARY_TRANSITION_MIN:-}
+      COUNTERSIGN_SALARY_ACCEPTABLE_MIN: ${COUNTERSIGN_SALARY_ACCEPTABLE_MIN:-}
+      COUNTERSIGN_SALARY_ATTRACTIVE_MIN: ${COUNTERSIGN_SALARY_ATTRACTIVE_MIN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

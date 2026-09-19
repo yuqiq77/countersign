@@ -6,10 +6,10 @@ from pathlib import Path
 import anthropic
 import pytest
 
+from countersign.env import clear_blank_env, optional_env
 from countersign.gateway.anthropic_provider import AnthropicProvider, request_id_of
 from countersign.gateway.evaluator import resolve_provider
 from countersign.gateway.fake_provider import FakeEvaluationProvider
-from countersign.gateway.provider import clear_blank_env, optional_env
 
 _SDK_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 
