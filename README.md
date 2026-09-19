@@ -70,7 +70,7 @@ docker compose -f infra/compose/docker-compose.yml up --build
 
 This starts PostgreSQL (host port :5435), self-hosted Temporal (+ UI on
 :8080), a one-shot Alembic migration, the API (:8000), the worker, and the
-web UI (:3001).
+web UI (:3001). All host ports bind to 127.0.0.1.
 The worker defaults to the deterministic fake model; set
 `COUNTERSIGN_MODEL_PROVIDER=anthropic`, `COUNTERSIGN_MODEL_ID`, and
 `ANTHROPIC_API_KEY` for live evaluations. Anthropic-compatible relays can set
