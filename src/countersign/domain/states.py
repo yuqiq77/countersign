@@ -32,9 +32,7 @@ ALLOWED_TRANSITIONS: dict[CaseState, frozenset[CaseState]] = {
     CaseState.DISCOVERED: frozenset({CaseState.SNAPSHOTTED, CaseState.QUARANTINED}),
     CaseState.SNAPSHOTTED: frozenset({CaseState.NORMALIZED, CaseState.QUARANTINED}),
     CaseState.NORMALIZED: frozenset({CaseState.DEDUPLICATED, CaseState.QUARANTINED}),
-    CaseState.DEDUPLICATED: frozenset(
-        {CaseState.OFFICIAL_SOURCE_VERIFIED, CaseState.QUARANTINED}
-    ),
+    CaseState.DEDUPLICATED: frozenset({CaseState.OFFICIAL_SOURCE_VERIFIED, CaseState.QUARANTINED}),
     CaseState.OFFICIAL_SOURCE_VERIFIED: frozenset(
         {CaseState.EVALUATED, CaseState.CLOSED_OR_STALE, CaseState.QUARANTINED}
     ),

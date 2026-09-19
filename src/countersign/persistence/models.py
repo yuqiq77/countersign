@@ -49,14 +49,10 @@ class BlobRow(Base):
 
 class SourceSnapshotRow(Base):
     __tablename__ = "source_snapshots"
-    __table_args__ = (
-        UniqueConstraint("case_id", "content_hash", name="uq_snapshot_case_hash"),
-    )
+    __table_args__ = (UniqueConstraint("case_id", "content_hash", name="uq_snapshot_case_hash"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("job_cases.id"), nullable=False
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
     canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     final_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     source_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -76,9 +72,7 @@ class VerificationRow(Base):
     __tablename__ = "verification_records"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("job_cases.id"), nullable=False
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False)
     authority: Mapped[str] = mapped_column(String(40), nullable=False)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -96,9 +90,7 @@ class EvaluationRunRow(Base):
     __tablename__ = "evaluation_runs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("job_cases.id"), nullable=False
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -113,17 +105,13 @@ class ApprovalRequestRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("job_cases.id"), nullable=False
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     allowed_decisions: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Artifacts under review, pinned at creation (v4 §10): the reviewer
     # decides against these ids, not against whatever is latest at render time.
     snapshot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

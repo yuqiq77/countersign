@@ -34,17 +34,13 @@ def allowed_decisions_for(
     return [ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE]
 
 
-def gated_decision(
-    evaluation: ModelEvaluation, verification: VerificationResult
-) -> EvalDecision:
+def gated_decision(evaluation: ModelEvaluation, verification: VerificationResult) -> EvalDecision:
     """Downgrade the model's decision when the status gate forbids it.
 
     The model's proposal is preserved in the evaluation record; the gated
     value is what the product displays and acts on.
     """
 
-    if evaluation.decision == EvalDecision.APPLY_NOW and not apply_now_permitted(
-        verification
-    ):
+    if evaluation.decision == EvalDecision.APPLY_NOW and not apply_now_permitted(verification):
         return EvalDecision.WAIT
     return evaluation.decision

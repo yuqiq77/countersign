@@ -47,12 +47,9 @@ def test_authority_classification() -> None:
         classify_authority("https://boards.greenhouse.io/acme/jobs/1")
         == SourceAuthority.OFFICIAL_ATS
     )
+    assert classify_authority("https://jobs.lever.co/acme/1") == SourceAuthority.OFFICIAL_ATS
     assert (
-        classify_authority("https://jobs.lever.co/acme/1") == SourceAuthority.OFFICIAL_ATS
-    )
-    assert (
-        classify_authority("https://www.linkedin.com/jobs/view/1")
-        == SourceAuthority.DISCOVERY_ONLY
+        classify_authority("https://www.linkedin.com/jobs/view/1") == SourceAuthority.DISCOVERY_ONLY
     )
     assert classify_authority("https://acme.com/about") == SourceAuthority.COMPANY_CONTROLLED
 

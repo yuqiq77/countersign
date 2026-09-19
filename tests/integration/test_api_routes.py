@@ -109,9 +109,7 @@ async def test_key_reuse_with_different_payload_conflicts(
     assert conflict.status_code == 409
 
 
-def _seed_approval(
-    *, allowed: list[ApprovalDecision], status: ApprovalRequestStatus
-) -> str:
+def _seed_approval(*, allowed: list[ApprovalDecision], status: ApprovalRequestStatus) -> str:
     with session_scope() as session:
         repo.create_case(session, case_id="c1", url=PUBLIC_URL)
         row = repo.create_approval_request(

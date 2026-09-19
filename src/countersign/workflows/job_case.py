@@ -59,9 +59,7 @@ class JobIntelligenceWorkflow:
         self._approval_request_id: str | None = None
         self._decision: DecisionSignal | None = None
 
-    async def _quarantine(
-        self, payload: CaseWorkflowInput, reason: str
-    ) -> CaseWorkflowResult:
+    async def _quarantine(self, payload: CaseWorkflowInput, reason: str) -> CaseWorkflowResult:
         await workflow.execute_activity(
             "quarantine_case",
             CaseStateNote(case_id=payload.case_id, reason=reason),
@@ -108,9 +106,7 @@ class JobIntelligenceWorkflow:
             self._state = CaseState.OFFICIAL_SOURCE_VERIFIED
         except ActivityError as error:
             kind = _error_type(error) or "unknown"
-            return await self._quarantine(
-                payload, f"pipeline failure before evaluation: {kind}"
-            )
+            return await self._quarantine(payload, f"pipeline failure before evaluation: {kind}")
 
         if verify.verification.status in (JobStatus.CLOSED, JobStatus.EXPIRED):
             await workflow.execute_activity(
@@ -160,9 +156,7 @@ class JobIntelligenceWorkflow:
         remaining = approval.expires_at - workflow.now()
         timeout = max(remaining, timedelta(seconds=1))
         try:
-            await workflow.wait_condition(
-                lambda: self._decision is not None, timeout=timeout
-            )
+            await workflow.wait_condition(lambda: self._decision is not None, timeout=timeout)
         except TimeoutError:
             await workflow.execute_activity(
                 "expire_approval",

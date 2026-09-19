@@ -46,9 +46,7 @@ def _client_for(transport: httpx.BaseTransport | None) -> httpx.Client:
     a transport (httpx transports are client-level, not per-request)."""
 
     if transport is not None:
-        return httpx.Client(
-            follow_redirects=False, timeout=TIMEOUT_SECONDS, transport=transport
-        )
+        return httpx.Client(follow_redirects=False, timeout=TIMEOUT_SECONDS, transport=transport)
     global _shared_client
     if _shared_client is None:
         _shared_client = httpx.Client(follow_redirects=False, timeout=TIMEOUT_SECONDS)
@@ -114,9 +112,7 @@ def _read_limited(response: httpx.Response) -> bytes:
     if declared is not None:
         try:
             if int(declared) > MAX_BODY_BYTES:
-                raise FetchPolicyError(
-                    f"declared content-length exceeds {MAX_BODY_BYTES} bytes"
-                )
+                raise FetchPolicyError(f"declared content-length exceeds {MAX_BODY_BYTES} bytes")
         except ValueError:
             pass
     total = 0
@@ -162,9 +158,7 @@ def fetch_url(
             target = logical
             headers = {"User-Agent": "countersign/0.1"}
             extensions = {}
-        with client.stream(
-            "GET", target, headers=headers, extensions=extensions
-        ) as response:
+        with client.stream("GET", target, headers=headers, extensions=extensions) as response:
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get("location")
                 if not location:
@@ -173,13 +167,9 @@ def fetch_url(
                 current = str(logical.join(location))
                 continue
             body = _read_limited(response)
-            content_type = response.headers.get(
-                "content-type", "application/octet-stream"
-            )
+            content_type = response.headers.get("content-type", "application/octet-stream")
             base_type = content_type.split(";", 1)[0].strip().lower()
-            if response.status_code < 400 and not base_type.startswith(
-                _ALLOWED_CONTENT_PREFIXES
-            ):
+            if response.status_code < 400 and not base_type.startswith(_ALLOWED_CONTENT_PREFIXES):
                 raise FetchPolicyError(f"content type {base_type!r} is not allowed")
             return FetchResult(
                 requested_url=url,

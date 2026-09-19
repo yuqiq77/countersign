@@ -32,9 +32,7 @@ def test_currency_mismatch_is_unknown() -> None:
 
 
 def test_no_amounts_is_unknown() -> None:
-    result = compute_compensation_signal(
-        extraction(min_amount=None, max_amount=None), BANDS
-    )
+    result = compute_compensation_signal(extraction(min_amount=None, max_amount=None), BANDS)
     assert result == CompensationSignal.UNKNOWN
 
 
@@ -46,13 +44,9 @@ def test_band_mapping() -> None:
         40_000: CompensationSignal.CONCERNING,
     }
     for amount, expected in cases.items():
-        assert (
-            compute_compensation_signal(extraction(min_amount=amount), BANDS) == expected
-        )
+        assert compute_compensation_signal(extraction(min_amount=amount), BANDS) == expected
 
 
 def test_uses_highest_stated_amount() -> None:
-    result = compute_compensation_signal(
-        extraction(min_amount=80_000, max_amount=125_000), BANDS
-    )
+    result = compute_compensation_signal(extraction(min_amount=80_000, max_amount=125_000), BANDS)
     assert result == CompensationSignal.ATTRACTIVE

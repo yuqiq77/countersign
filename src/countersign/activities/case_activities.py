@@ -231,9 +231,7 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             content_changed=content_changed,
             snapshot_id=stored_snapshot_id,
         )
-        repo.record_verification(
-            session, verification_id=verification_id, result=verification
-        )
+        repo.record_verification(session, verification_id=verification_id, result=verification)
         repo.transition_case(
             session,
             case_id=payload.case_id,
@@ -280,8 +278,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
         raise ApplicationError(str(exc), type="ContractFailure", non_retryable=True) from exc
     usage = record.usage
     activity.logger.info(
-        "evaluate: %s request_id=%s model=%s in=%d out=%d cache_read=%d "
-        "latency_ms=%d repairs=%d",
+        "evaluate: %s request_id=%s model=%s in=%d out=%d cache_read=%d latency_ms=%d repairs=%d",
         record.evaluation_id,
         usage.provider_request_id,
         usage.model_id,
@@ -362,9 +359,7 @@ def finalize_decision(signal: DecisionSignal) -> None:
                 decision_version=signal.decision_version,
             )
         except repo.DecisionConflictError as exc:
-            raise ApplicationError(
-                str(exc), type="DecisionConflict", non_retryable=True
-            ) from exc
+            raise ApplicationError(str(exc), type="DecisionConflict", non_retryable=True) from exc
         repo.transition_case(
             session,
             case_id=request.case_id,

@@ -143,9 +143,13 @@ def run_evaluation(
     last_error: GatewayError | None = None
     for attempt in range(cfg.max_repair_attempts + 1):
         try:
-            prompt = user if attempt == 0 else (
-                f"{user}\n\nYour previous output failed contract validation "
-                f"({last_error}). Return output that satisfies the schema exactly."
+            prompt = (
+                user
+                if attempt == 0
+                else (
+                    f"{user}\n\nYour previous output failed contract validation "
+                    f"({last_error}). Return output that satisfies the schema exactly."
+                )
             )
             _log.info(
                 "provider request: case=%s route=%s repair_attempt=%d",

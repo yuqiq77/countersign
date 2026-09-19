@@ -42,9 +42,7 @@ def test_connection_is_pinned_to_the_vetted_address(
         return httpx.Response(200, headers=HTML_HEADERS, content=b"<p>Apply now</p>")
 
     monkeypatch.setattr(http_fetch, "_resolved_addresses", _static_resolver(PUBLIC_IP))
-    result = fetch_url(
-        "http://example.com/jobs/1", transport=httpx.MockTransport(handler)
-    )
+    result = fetch_url("http://example.com/jobs/1", transport=httpx.MockTransport(handler))
     assert result.http_status == 200
     assert seen[0].url.host == PUBLIC_IP
     assert seen[0].headers["host"] == "example.com"
@@ -75,9 +73,7 @@ def test_redirect_hop_to_private_destination_is_rejected(
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            302, headers={"location": "http://internal.example/secret"}
-        )
+        return httpx.Response(302, headers={"location": "http://internal.example/secret"})
 
     with pytest.raises(FetchPolicyError):
         fetch_url("http://example.com/jobs/1", transport=httpx.MockTransport(handler))

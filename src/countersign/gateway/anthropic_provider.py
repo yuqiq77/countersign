@@ -63,9 +63,7 @@ class AnthropicProvider:
             raise ProviderRefusal("model declined the evaluation request")
         parsed = response.parsed_output
         if parsed is None:
-            raise ContractFailure(
-                f"no contract-valid output (stop_reason={response.stop_reason})"
-            )
+            raise ContractFailure(f"no contract-valid output (stop_reason={response.stop_reason})")
         usage = response.usage
         return ProviderResponse(
             evaluation=parsed,

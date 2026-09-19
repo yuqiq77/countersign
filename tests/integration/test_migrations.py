@@ -22,9 +22,7 @@ EXPECTED_TABLES = {
 }
 
 
-def test_upgrade_head_creates_schema(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_upgrade_head_creates_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     url = f"sqlite+pysqlite:///{tmp_path}/migrate.db"
     monkeypatch.setenv("COUNTERSIGN_DATABASE_URL", url)
 

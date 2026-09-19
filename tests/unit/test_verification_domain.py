@@ -38,8 +38,7 @@ def test_http_errors_are_unknown() -> None:
 def test_open_requires_official_authority_and_markers() -> None:
     assert classify(apply_markers=True) == JobStatus.OPEN
     assert (
-        classify(apply_markers=True, authority=SourceAuthority.OFFICIAL_COMPANY)
-        == JobStatus.OPEN
+        classify(apply_markers=True, authority=SourceAuthority.OFFICIAL_COMPANY) == JobStatus.OPEN
     )
     assert (
         classify(apply_markers=True, authority=SourceAuthority.COMPANY_CONTROLLED)
@@ -73,9 +72,7 @@ def test_plain_approve_requires_verified_open() -> None:
     """The lifecycle gate, not a display concern: without a verified OPEN,
     the approval request itself must not accept a plain APPROVE."""
 
-    assert ApprovalDecision.APPROVE in allowed_decisions_for(
-        _verification(JobStatus.OPEN)
-    )
+    assert ApprovalDecision.APPROVE in allowed_decisions_for(_verification(JobStatus.OPEN))
     for status in (
         JobStatus.OPEN_THIRD_PARTY_ONLY,
         JobStatus.UNKNOWN_STALE_RISK,

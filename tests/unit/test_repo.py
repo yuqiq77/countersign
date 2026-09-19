@@ -41,9 +41,7 @@ def test_reapplied_transition_adds_no_duplicate_audit() -> None:
         )
     with session_scope() as session:
         audits = list(
-            session.scalars(
-                select(AuditEventRow).where(AuditEventRow.resource_id == "c1")
-            )
+            session.scalars(select(AuditEventRow).where(AuditEventRow.resource_id == "c1"))
         )
         actions = [a.action for a in audits]
         assert actions.count("case.state.snapshotted") == 1
@@ -138,9 +136,7 @@ def test_legal_reentry_into_a_visited_state_still_audits() -> None:
             )
     with session_scope() as session:
         audits = list(
-            session.scalars(
-                select(AuditEventRow).where(AuditEventRow.resource_id == "c1")
-            )
+            session.scalars(select(AuditEventRow).where(AuditEventRow.resource_id == "c1"))
         )
         actions = [a.action for a in audits]
         assert actions.count("case.state.official_source_verified") == 2

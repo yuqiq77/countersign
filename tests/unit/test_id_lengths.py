@@ -41,6 +41,5 @@ def test_generated_ids_fit_their_columns() -> None:
         length = getattr(column.type, "length", None)
         assert length is not None, f"{column} has no declared length"
         assert len(sample) <= length, (
-            f"{column}: sample id {sample!r} is {len(sample)} chars, "
-            f"column allows {length}"
+            f"{column}: sample id {sample!r} is {len(sample)} chars, column allows {length}"
         )

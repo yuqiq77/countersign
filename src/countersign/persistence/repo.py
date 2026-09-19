@@ -435,9 +435,7 @@ def create_approval_request(
     return row
 
 
-def get_approval_request(
-    session: Session, approval_request_id: str
-) -> ApprovalRequestRow | None:
+def get_approval_request(session: Session, approval_request_id: str) -> ApprovalRequestRow | None:
     return session.get(ApprovalRequestRow, approval_request_id)
 
 
@@ -468,9 +466,7 @@ def approval_view(row: ApprovalRequestRow) -> ApprovalRequestView:
 def get_decision(
     session: Session, approval_request_id: str, decision_version: int
 ) -> HumanDecisionRow | None:
-    return session.get(
-        HumanDecisionRow, f"dec-{approval_request_id}-v{decision_version}"
-    )
+    return session.get(HumanDecisionRow, f"dec-{approval_request_id}-v{decision_version}")
 
 
 def record_decision(
@@ -534,9 +530,7 @@ def record_decision(
 # --- idempotency -----------------------------------------------------------
 
 
-def find_idempotent(
-    session: Session, *, key: str, operation: str
-) -> IdempotencyRow | None:
+def find_idempotent(session: Session, *, key: str, operation: str) -> IdempotencyRow | None:
     return session.get(IdempotencyRow, (key, operation))
 
 

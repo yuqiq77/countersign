@@ -27,9 +27,7 @@ async def time_skipping_env() -> WorkflowEnvironment:
     converter, so tests must too.
     """
 
-    return await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    return await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
 
 
 async def start_case(

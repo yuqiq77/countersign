@@ -85,9 +85,7 @@ async def create_case(
 
     fingerprint = _create_fingerprint(payload)
     with session_scope() as session:
-        existing = repo.find_idempotent(
-            session, key=idempotency_key, operation="create_case"
-        )
+        existing = repo.find_idempotent(session, key=idempotency_key, operation="create_case")
         if existing is not None:
             if existing.fingerprint != fingerprint:
                 raise HTTPException(
@@ -99,9 +97,7 @@ async def create_case(
             state = CaseState(row.state) if row is not None else CaseState.DISCOVERED
         else:
             case_id = repo.new_uuid()
-            repo.create_case(
-                session, case_id=case_id, url=payload.url, request_id=idempotency_key
-            )
+            repo.create_case(session, case_id=case_id, url=payload.url, request_id=idempotency_key)
             repo.save_idempotent(
                 session,
                 key=idempotency_key,
@@ -161,9 +157,7 @@ async def submit_decision(
         if request is None:
             raise HTTPException(status_code=404, detail="unknown approval request")
 
-        existing = repo.get_decision(
-            session, approval_request_id, payload.decision_version
-        )
+        existing = repo.get_decision(session, approval_request_id, payload.decision_version)
         if existing is not None:
             if (
                 existing.decision == payload.decision.value
@@ -191,9 +185,7 @@ async def submit_decision(
         case_id = request.case_id
 
     client = await _temporal()
-    handle: WorkflowHandle[object, object] = client.get_workflow_handle(
-        workflow_id_for(case_id)
-    )
+    handle: WorkflowHandle[object, object] = client.get_workflow_handle(workflow_id_for(case_id))
     try:
         await handle.signal(
             "submit_decision",

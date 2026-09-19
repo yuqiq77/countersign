@@ -39,6 +39,8 @@ jobs:
           .venv/bin/pip install -e ".[dev]"
       - name: Ruff
         run: .venv/bin/ruff check .
+      - name: Ruff format
+        run: .venv/bin/ruff format --check .
       - name: Pyright
         run: .venv/bin/pyright
       - name: Import contracts
