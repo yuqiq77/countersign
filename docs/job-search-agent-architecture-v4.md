@@ -345,7 +345,7 @@ Evaluation contract: enums are unified; claim fields are typed and cited; `compe
   "domain_lock_in_risk": 2,
   "transition_feasibility": 6,
   "seniority_fit": "REALISTIC | PLAUSIBLE_STRETCH | LOW_PROBABILITY_STRETCH | BENCHMARK_ONLY | SKIP",
-  "compensation_signal": "ATTRACTIVE | ACCEPTABLE | TRANSITION_DISCOUNT | CONCERNING | UNKNOWN",
+  "compensation_signal": "ATTRACTIVE | ACCEPTABLE | CONCERNING | UNKNOWN",
   "salary_extraction": {"official": false, "source_authority": "THIRD_PARTY", "cited_span_id": "uuid"},
   "hard_blockers": [
     {"category": "EXPERIENCE_YEARS", "severity": "HARD",

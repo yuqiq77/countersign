@@ -69,7 +69,11 @@ them.
   `HANDOFF.md`, `config/operator/`, and `data/operator/` are gitignored
   locations for private context and real policy values. Keep tracked
   files and commit messages depersonalized; review changes for
-  confidential data before committing.
+  confidential data before committing. The operator profile reaches the
+  evaluator only through `COUNTERSIGN_OPERATOR_PROFILE_PATH` — there is
+  deliberately no default path, so tests and host processes never pick it
+  up by accident. Persist its 8-hex fingerprint as policy identity; never
+  separately persist or log the raw profile text.
 - **Temporal test environments need `pydantic_data_converter`.** Contracts
   are `strict=True`; the SDK's default converter validates in Python mode
   and rejects enum-typed fields. Use `time_skipping_env()` from

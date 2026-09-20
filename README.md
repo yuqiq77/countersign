@@ -80,8 +80,13 @@ web UI (:3001). All host ports bind to 127.0.0.1.
 The worker defaults to the deterministic fake model; set
 `COUNTERSIGN_MODEL_PROVIDER=anthropic`, `COUNTERSIGN_MODEL_ID`, and
 `ANTHROPIC_API_KEY` for live evaluations. Anthropic-compatible relays can set
-`ANTHROPIC_BASE_URL`. Explicitly pass the repository-root environment file
-when starting a live evaluation stack:
+`ANTHROPIC_BASE_URL`. The evaluator judges fit against an operator profile
+only when `COUNTERSIGN_OPERATOR_PROFILE_PATH` names one — a gitignored
+Markdown file under `config/operator/`, given as a repository-relative path;
+Compose mounts that directory read-only at the same relative location in the
+worker. Unset, the prompt states that no candidate profile was provided and
+the model must not infer one. Explicitly pass the repository-root environment
+file when starting a live evaluation stack:
 
 ```bash
 docker compose --env-file .env -f infra/compose/docker-compose.yml up --build
@@ -97,14 +102,19 @@ Implemented (Slice 1 — one durable case):
 
 - paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
 - `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
-  durable approval Signal wait, with quarantine/closed/expiry paths;
-- SSRF-guarded fetch, deterministic HTML normalization, authority-aware
+  durable approval Signal wait, with quarantine/closed/expiry paths and a
+  needs-evidence stop before the model when the verified page has no
+  posting text;
+- SSRF-guarded fetch, deterministic HTML normalization (visible text, or
+  the JSON-LD `JobPosting` description when a client-rendered page has
+  none), authority-aware
   official-status verification (never inferred from HTTP 200 alone);
 - thin model gateway: structured output against the Pydantic contract,
   bounded schema-repair retry, token/latency/version capture; deterministic
   fake provider for tests and model-free runs;
-- deterministic compensation signal computed from extracted salary data —
-  never by the model;
+- deterministic compensation signal computed from extracted salary data
+  against acceptable and attractive thresholds: `CONCERNING`, `ACCEPTABLE`,
+  or `ATTRACTIVE`; missing data or a currency mismatch yields `UNKNOWN`;
 - idempotent persistence (deterministic IDs, dedup constraints, converged
   retries) with append-only audit events in the same transaction;
 - Alembic migrations, Compose core profile, CI (ruff, pyright,
