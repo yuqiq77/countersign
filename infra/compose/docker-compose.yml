@@ -86,13 +86,19 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # A blank base URL is treated as unset by the gateway.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
-      # Operator salary bands: set all four in .env or none. Blank counts as
+      # Operator salary bands: set all three in .env or none. Blank counts as
       # unset; the worker refuses to start on a partial set and falls back to
       # the generic USD example (with a warning) on none.
       COUNTERSIGN_SALARY_CURRENCY: ${COUNTERSIGN_SALARY_CURRENCY:-}
-      COUNTERSIGN_SALARY_TRANSITION_MIN: ${COUNTERSIGN_SALARY_TRANSITION_MIN:-}
       COUNTERSIGN_SALARY_ACCEPTABLE_MIN: ${COUNTERSIGN_SALARY_ACCEPTABLE_MIN:-}
       COUNTERSIGN_SALARY_ATTRACTIVE_MIN: ${COUNTERSIGN_SALARY_ATTRACTIVE_MIN:-}
+      # Operator profile path, passed through verbatim. The repository's
+      # config/operator/ is mounted read-only at the same relative location
+      # under the image's working directory (/app), so the documented value
+      # config/operator/<file>.md resolves on the host and in the worker alike.
+      COUNTERSIGN_OPERATOR_PROFILE_PATH: ${COUNTERSIGN_OPERATOR_PROFILE_PATH:-}
+    volumes:
+      - ../../config/operator:/app/config/operator:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

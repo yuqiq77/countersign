@@ -4,9 +4,7 @@ from countersign.contracts.enums import CompensationSignal, SourceAuthority
 from countersign.contracts.evaluation import SalaryExtraction
 from countersign.domain.compensation import SalaryBands, compute_compensation_signal
 
-BANDS = SalaryBands(
-    currency="USD", transition_min=60_000, acceptable_min=90_000, attractive_min=120_000
-)
+BANDS = SalaryBands(currency="USD", acceptable_min=90_000, attractive_min=120_000)
 
 
 def extraction(**overrides: object) -> SalaryExtraction:
@@ -39,8 +37,12 @@ def test_no_amounts_is_unknown() -> None:
 def test_band_mapping() -> None:
     cases = {
         130_000: CompensationSignal.ATTRACTIVE,
+        120_000: CompensationSignal.ATTRACTIVE,
+        119_999: CompensationSignal.ACCEPTABLE,
         95_000: CompensationSignal.ACCEPTABLE,
-        70_000: CompensationSignal.TRANSITION_DISCOUNT,
+        90_000: CompensationSignal.ACCEPTABLE,
+        89_999: CompensationSignal.CONCERNING,
+        70_000: CompensationSignal.CONCERNING,
         40_000: CompensationSignal.CONCERNING,
     }
     for amount, expected in cases.items():
@@ -56,10 +58,8 @@ def test_bands_enforce_currency_case_and_threshold_order() -> None:
     import pytest
 
     with pytest.raises(ValueError, match="upper-case"):
-        SalaryBands(currency="usd", transition_min=1, acceptable_min=2, attractive_min=3)
+        SalaryBands(currency="usd", acceptable_min=2, attractive_min=3)
     with pytest.raises(ValueError, match="ascend"):
-        SalaryBands(
-            currency="USD", transition_min=90_000, acceptable_min=60_000, attractive_min=120_000
-        )
+        SalaryBands(currency="USD", acceptable_min=120_000, attractive_min=90_000)
     with pytest.raises(ValueError, match="ascend"):
-        SalaryBands(currency="USD", transition_min=0, acceptable_min=1, attractive_min=2)
+        SalaryBands(currency="USD", acceptable_min=0, attractive_min=2)

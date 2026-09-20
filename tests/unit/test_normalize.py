@@ -88,3 +88,68 @@ def test_og_title_wins_over_placeholder_title_tag() -> None:
     assert normalize_html(real).title == "Research Engineer"
     assert normalize_html(placeholder).content_hash == normalize_html(real).content_hash
     assert normalize_html(HTML).title == "Senior Engineer - ExampleCorp"
+
+
+def test_smartrecruiters_apply_label_counts_with_either_apostrophe() -> None:
+    """The site's apply button reads "I'm interested"; pages use both apostrophes."""
+
+    for label in ("I'm interested", "I\u2019m interested"):
+        page = f"<html><body><h1>Engineer</h1><p>Build.</p><button>{label}</button></body></html>"
+        assert normalize_html(page.encode()).apply_markers_found, label
+
+
+_LDJSON_PAGE = b"""
+<html><head>
+  <title>Member of Technical Staff</title>
+  <script type="application/ld+json">
+  {"@context": "https://schema.org", "@type": "JobPosting",
+   "title": "Member of Technical Staff",
+   "hiringOrganization": {"@type": "Organization", "name": "Example Labs"},
+   "description": "<p>Build evaluation infrastructure.</p><ul><li>Python</li></ul>\
+<p>Apply now.</p>",
+   "directApply": true}
+  </script>
+  <script>window.__APP__ = {};</script>
+</head><body><div id="root"></div></body></html>
+"""
+
+
+def _ldjson_page(script: str) -> bytes:
+    return (
+        b'<html><head><script type="application/ld+json">'
+        + script.encode()
+        + b"</script></head><body></body></html>"
+    )
+
+
+def test_json_ld_job_posting_is_the_fallback_for_client_rendered_pages() -> None:
+    result = normalize_html(_LDJSON_PAGE)
+    assert result.text_source == "json-ld"
+    assert "Build evaluation infrastructure." in result.text
+    assert "Python" in result.text
+    assert "window.__APP__" not in result.text
+    assert result.title == "Member of Technical Staff"
+    assert result.company_hint == "Example Labs"
+    assert result.apply_markers_found
+    assert normalize_html(_LDJSON_PAGE).content_hash == result.content_hash
+
+
+def test_visible_text_wins_over_json_ld_and_is_never_merged() -> None:
+    page = _LDJSON_PAGE.replace(b'<div id="root"></div>', b"<p>Visible body only.</p>")
+    result = normalize_html(page)
+    assert result.text_source == "html"
+    assert result.text == "Visible body only."
+
+
+def test_json_ld_edge_cases_leave_the_text_empty() -> None:
+    malformed = normalize_html(_ldjson_page("{not json"))
+    assert malformed.text_source == "none" and malformed.text == ""
+    other_type = normalize_html(_ldjson_page('{"@type": "Organization", "name": "X"}'))
+    assert other_type.text == ""
+    nested = normalize_html(
+        _ldjson_page(
+            '{"@graph": [{"@type": "WebPage"},'
+            ' {"@type": ["JobPosting"], "description": "Nested posting."}]}'
+        )
+    )
+    assert nested.text == "Nested posting." and nested.text_source == "json-ld"

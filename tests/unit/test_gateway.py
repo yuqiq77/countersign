@@ -15,9 +15,7 @@ from countersign.gateway.evaluator import EvaluatorConfig, run_evaluation
 from countersign.gateway.fake_provider import FakeEvaluationProvider
 from countersign.gateway.provider import ContractFailure
 
-BANDS = SalaryBands(
-    currency="USD", transition_min=60_000, acceptable_min=90_000, attractive_min=120_000
-)
+BANDS = SalaryBands(currency="USD", acceptable_min=90_000, attractive_min=120_000)
 
 
 def run(
@@ -25,6 +23,7 @@ def run(
     *,
     config: EvaluatorConfig | None = None,
     bands: SalaryBands = BANDS,
+    profile: str | None = None,
 ):
     return run_evaluation(
         provider,
@@ -35,6 +34,7 @@ def run(
         text="A job posting body.",
         verification=None,
         bands=bands,
+        profile=profile,
         config=config,
     )
 
@@ -123,7 +123,7 @@ def test_compensation_signal_is_computed_not_modeled() -> None:
 
 def test_versions_are_stamped() -> None:
     record = run(FakeEvaluationProvider())
-    assert record.policy_version == f"default-rubric/0.1.0+bands.{BANDS.fingerprint()}"
+    assert record.policy_version == f"default-rubric/0.2.0+bands.{BANDS.fingerprint()}+profile.none"
     assert record.prompt_version.startswith("evaluator/")
     assert record.model_route == "reasoning-standard"
 
@@ -132,18 +132,28 @@ def test_different_salary_bands_are_different_evaluations() -> None:
     """Bands feed the compensation signal, so they are policy identity:
     same posting, other bands → other policy_version and evaluation id."""
 
-    other = SalaryBands(
-        currency="EUR", transition_min=50_000, acceptable_min=70_000, attractive_min=95_000
-    )
-    same = SalaryBands(
-        currency="USD", transition_min=60_000, acceptable_min=90_000, attractive_min=120_000
-    )
+    other = SalaryBands(currency="EUR", acceptable_min=70_000, attractive_min=95_000)
+    same = SalaryBands(currency="USD", acceptable_min=90_000, attractive_min=120_000)
     base = run(FakeEvaluationProvider())
     assert run(FakeEvaluationProvider(), bands=same).evaluation_id == base.evaluation_id
     moved = run(FakeEvaluationProvider(), bands=other)
     assert moved.evaluation_id != base.evaluation_id
     assert moved.policy_version != base.policy_version
     assert len(moved.policy_version) <= 64  # persisted column width
+
+
+def test_operator_profile_is_policy_identity_too() -> None:
+    base = run(FakeEvaluationProvider())
+    with_profile = run(FakeEvaluationProvider(), profile="Engineer, fluent in two languages.")
+    edited = run(FakeEvaluationProvider(), profile="Engineer, fluent in three languages.")
+    assert base.policy_version.endswith("+profile.none")
+    assert with_profile.evaluation_id != base.evaluation_id
+    assert edited.evaluation_id != with_profile.evaluation_id
+    assert (
+        run(FakeEvaluationProvider(), profile="Engineer, fluent in two languages.").evaluation_id
+        == with_profile.evaluation_id
+    )
+    assert len(with_profile.policy_version) <= 64
 
 
 def test_salary_source_facts_are_stamped_from_verification() -> None:

@@ -45,6 +45,7 @@ from countersign.persistence import repo
 from countersign.persistence.blobstore import DatabaseBlobStore, sha256_hex
 from countersign.persistence.db import session_scope
 from countersign.policy.defaults import salary_bands
+from countersign.policy.operator_profile import load_operator_profile
 
 APPROVAL_TTL_DAYS = 7
 
@@ -240,7 +241,7 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             actor_id="worker",
             workflow_id=_workflow_id(),
         )
-    return VerifyOutcome(verification=verification)
+    return VerifyOutcome(verification=verification, observed_text_chars=len(normalized.text))
 
 
 @activity.defn(name="evaluate_case")
@@ -272,6 +273,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             text=normalized.text,
             verification=verification,
             bands=salary_bands(),
+            profile=load_operator_profile(),
             generation=payload.generation,
         )
     except (ContractFailure, ProviderRefusal) as exc:
@@ -387,6 +389,22 @@ def mark_closed(note: CaseStateNote) -> None:
         )
 
 
+@activity.defn(name="mark_needs_evidence")
+def mark_needs_evidence(note: CaseStateNote) -> None:
+    """Stop a verified case before the model: there is nothing to evaluate."""
+
+    with session_scope() as session:
+        repo.transition_case(
+            session,
+            case_id=note.case_id,
+            new_state=CaseState.NEEDS_MORE_EVIDENCE,
+            actor_type=ActorType.SERVICE,
+            actor_id="worker",
+            reason=note.reason,
+            workflow_id=_workflow_id(),
+        )
+
+
 @activity.defn(name="quarantine_case")
 def quarantine_case(note: CaseStateNote) -> None:
     """Quarantine a case after a non-recoverable operational failure."""
@@ -447,6 +465,7 @@ ALL_ACTIVITIES = [
     create_approval,
     finalize_decision,
     mark_closed,
+    mark_needs_evidence,
     quarantine_case,
     expire_approval,
 ]

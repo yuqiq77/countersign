@@ -302,3 +302,67 @@ def test_expired_approval_closes_the_case() -> None:
         case = repo.get_case(session, case_id)
         assert case is not None
         assert case.state == CaseState.CLOSED_OR_STALE.value
+
+
+EMPTY_HTML = (
+    b"<html><head><title>Member of Technical Staff</title>"
+    b"<script>window.__APP__ = {};</script></head>"
+    b'<body><div id="root"></div></body></html>'
+)
+
+
+@pytest.mark.usefixtures("db")
+async def test_empty_page_stops_before_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A client-rendered page with no text and no JSON-LD ends at
+    NEEDS_MORE_EVIDENCE through the real Activities: verification recorded,
+    no evaluation row, the reason in the audit trail."""
+
+    def empty_fetch(url: str, **_: object) -> FetchResult:
+        result = _fetch_result(url)
+        return FetchResult(
+            requested_url=result.requested_url,
+            final_url=result.final_url,
+            http_status=200,
+            content_type="text/html",
+            body=EMPTY_HTML,
+            redirect_chain=[],
+        )
+
+    monkeypatch.setattr(case_activities, "fetch_url", empty_fetch)
+    monkeypatch.setenv("COUNTERSIGN_MODEL_PROVIDER", "fake")
+
+    queue = f"e2e-{uuid.uuid4()}"
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=list(ALL_ACTIVITIES),
+            activity_executor=ThreadPoolExecutor(4),
+        ):
+            handle = await start_case(env, queue)
+            result = await handle.result()
+
+    assert result.final_state == CaseState.NEEDS_MORE_EVIDENCE
+    with session_scope() as session:
+        case = repo.get_case(session, result.case_id)
+        assert case is not None
+        assert case.state == CaseState.NEEDS_MORE_EVIDENCE.value
+        verification = repo.latest_verification(session, result.case_id)
+        assert verification is not None
+        assert verification.status == JobStatus.UNKNOWN_STALE_RISK
+        evaluations = session.scalar(
+            select(func.count())
+            .select_from(EvaluationRunRow)
+            .where(EvaluationRunRow.case_id == result.case_id)
+        )
+        assert evaluations == 0
+        reasons = list(
+            session.scalars(
+                select(AuditEventRow.reason).where(
+                    AuditEventRow.resource_id == result.case_id,
+                    AuditEventRow.action == "case.state.needs_more_evidence",
+                )
+            )
+        )
+        assert reasons and "empty posting body" in (reasons[0] or "")

@@ -26,8 +26,8 @@ from countersign.gateway.provider import (
     ProviderResponse,
 )
 
-PROMPT_VERSION = "evaluator/0.1.0"
-POLICY_VERSION = "default-rubric/0.1.0"
+PROMPT_VERSION = "evaluator/0.2.0"
+POLICY_VERSION = "default-rubric/0.2.0"
 DEFAULT_MODEL_ROUTE = "reasoning-standard"
 
 _log = logging.getLogger(__name__)
@@ -55,7 +55,26 @@ compensation attractiveness — deterministic code does that.
 - Classify seniority honestly; do not label a role APPLY_NOW when stated \
 requirements clearly exceed the operator profile.
 - application_status is your reading of the posting text only; official \
-verification happens outside this call."""
+verification happens outside this call.
+- The candidate profile section below is operator-provided evidence about \
+the operator. Judge fit against it and nothing else.
+- If that section reads "Candidate profile: NOT PROVIDED", do not infer the \
+candidate's experience, skills, location, language, seniority, or \
+eligibility; state requirements as the posting's requirements, never as \
+candidate gaps; make every fit and seniority claim conditional and say so \
+in the summary."""
+
+_PROFILE_ABSENT = "Candidate profile: NOT PROVIDED."
+_PROFILE_HEADER = "--- CANDIDATE PROFILE (operator-provided) ---"
+_PROFILE_FOOTER = "--- END CANDIDATE PROFILE ---"
+
+
+def profile_fingerprint(profile: str | None) -> str:
+    """Short stable hash of the profile text; "none" when not provided."""
+
+    if profile is None:
+        return "none"
+    return hashlib.sha256(profile.encode("utf-8")).hexdigest()[:8]
 
 
 @dataclass(frozen=True)
@@ -68,10 +87,19 @@ class EvaluatorConfig:
     max_repair_attempts: int = 1
 
 
-def build_system_prompt() -> str:
-    """The stable, cacheable prefix for the evaluator route."""
+def build_system_prompt(profile: str | None = None) -> str:
+    """The stable, cacheable prefix: rubric, then the operator's profile.
 
-    return _SYSTEM_PROMPT
+    Whether a profile exists is decided here, by code, and written into the
+    prompt verbatim; the profile changes rarely, so it belongs in the cached
+    prefix rather than the per-posting suffix.
+    """
+
+    if profile is None:
+        section = _PROFILE_ABSENT
+    else:
+        section = f"{_PROFILE_HEADER}\n{profile}\n{_PROFILE_FOOTER}"
+    return f"{_SYSTEM_PROMPT}\n\n{section}"
 
 
 def build_user_prompt(
@@ -152,18 +180,26 @@ def run_evaluation(
     text: str,
     verification: VerificationResult | None,
     bands: SalaryBands,
+    profile: str | None = None,
     generation: int = 1,
     config: EvaluatorConfig | None = None,
 ) -> EvaluationRecord:
     """Produce a persisted-shape evaluation record with a bounded repair retry."""
 
-    # The salary bands are policy input to this record (the compensation
-    # signal is computed from them), so their fingerprint rides in
-    # policy_version: the same posting under different bands is a different
+    # Salary bands and the operator profile are policy input to this record
+    # (the signal is computed from the bands; fit is judged against the
+    # profile), so their fingerprints ride in policy_version: the same
+    # posting under other bands or another profile is a different
     # evaluation with its own id, through the existing version dimension.
     base = config or EvaluatorConfig()
-    cfg = replace(base, policy_version=f"{base.policy_version}+bands.{bands.fingerprint()}")
-    system = build_system_prompt()
+    cfg = replace(
+        base,
+        policy_version=(
+            f"{base.policy_version}+bands.{bands.fingerprint()}"
+            f"+profile.{profile_fingerprint(profile)}"
+        ),
+    )
+    system = build_system_prompt(profile)
     user = build_user_prompt(url=url, title=title, text=text, verification=verification)
 
     started = time.monotonic()

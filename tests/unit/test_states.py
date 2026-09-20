@@ -81,3 +81,11 @@ def test_retry_noop_for_already_passed_states() -> None:
     # Genuinely new transitions are not retry no-ops.
     assert not is_retry_noop(CaseState.PENDING_APPROVAL, CaseState.REJECTED)
     assert not is_retry_noop(CaseState.EVALUATED, CaseState.CLOSED_OR_STALE)
+
+
+def test_verified_case_may_stop_for_evidence_before_evaluation() -> None:
+    """An empty posting body ends the pipeline at NEEDS_MORE_EVIDENCE, not at
+    the model; a later re-observation re-enters verification as before."""
+
+    assert_transition(CaseState.OFFICIAL_SOURCE_VERIFIED, CaseState.NEEDS_MORE_EVIDENCE)
+    assert_transition(CaseState.NEEDS_MORE_EVIDENCE, CaseState.OFFICIAL_SOURCE_VERIFIED)

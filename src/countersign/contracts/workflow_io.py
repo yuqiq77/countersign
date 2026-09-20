@@ -41,6 +41,11 @@ class VerifyOutcome(ContractModel):
     """Result of the verify Activity."""
 
     verification: VerificationResult
+    # Length of the normalized posting text in the verified observation;
+    # zero means there is nothing to evaluate and the workflow stops before
+    # the model (NEEDS_MORE_EVIDENCE), never spending a call on an empty body.
+    # Old Temporal histories lack this field; None preserves their original path.
+    observed_text_chars: int | None = None
 
 
 class EvaluateOutcome(ContractModel):

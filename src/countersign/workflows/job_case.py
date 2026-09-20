@@ -125,6 +125,27 @@ class JobIntelligenceWorkflow:
                 decision=None,
             )
 
+        if verify.observed_text_chars == 0:
+            # Nothing to evaluate: no visible text and no JSON-LD posting in
+            # the verified observation. Stop here rather than pay for a model
+            # call that can only answer "the posting is empty".
+            await workflow.execute_activity(
+                "mark_needs_evidence",
+                CaseStateNote(
+                    case_id=payload.case_id,
+                    reason="empty posting body: no visible text and no JSON-LD "
+                    "JobPosting description in the verified observation",
+                ),
+                start_to_close_timeout=_ACTIVITY_TIMEOUT,
+                retry_policy=_RETRY,
+            )
+            self._state = CaseState.NEEDS_MORE_EVIDENCE
+            return CaseWorkflowResult(
+                case_id=payload.case_id,
+                final_state=CaseState.NEEDS_MORE_EVIDENCE,
+                decision=None,
+            )
+
         try:
             await workflow.execute_activity(
                 "evaluate_case",

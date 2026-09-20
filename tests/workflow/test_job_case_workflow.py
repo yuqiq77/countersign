@@ -59,6 +59,7 @@ def make_activities(
     evaluate_contract_failure: bool = False,
     snapshot_policy_failure: bool = False,
     approval_ttl: timedelta = timedelta(days=7),
+    observed_text_chars: int = 1200,
 ) -> list[ActivityFn]:
     def snapshot_record(case_id: str) -> SnapshotRecord:
         return SnapshotRecord(
@@ -113,7 +114,8 @@ def make_activities(
                 reason="mock",
                 apply_markers_found=status == JobStatus.OPEN,
                 closed_markers_found=status == JobStatus.CLOSED,
-            )
+            ),
+            observed_text_chars=observed_text_chars,
         )
 
     @activity.defn(name="evaluate_case")
@@ -151,6 +153,10 @@ def make_activities(
     async def mark_closed(note: CaseStateNote) -> None:
         recorder.hit("mark_closed")
 
+    @activity.defn(name="mark_needs_evidence")
+    async def mark_needs_evidence(note: CaseStateNote) -> None:
+        recorder.hit("mark_needs_evidence")
+
     @activity.defn(name="quarantine_case")
     async def quarantine_case(note: CaseStateNote) -> None:
         recorder.hit("quarantine_case")
@@ -167,6 +173,7 @@ def make_activities(
         create_approval,
         finalize_decision,
         mark_closed,
+        mark_needs_evidence,
         quarantine_case,
         expire_approval,
     ]
@@ -276,3 +283,26 @@ async def test_approval_expiry_never_implicitly_approves() -> None:
     assert result.decision is None
     assert recorder.calls["expire_approval"] == 1
     assert "finalize_decision" not in recorder.calls
+
+
+async def test_empty_posting_body_stops_before_the_model() -> None:
+    """A verified page with no posting text ends at NEEDS_MORE_EVIDENCE:
+    no model call, no approval request, the reason recorded by an Activity."""
+
+    recorder = Recorder()
+    queue = f"test-{uuid.uuid4()}"
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=make_activities(recorder, observed_text_chars=0),
+        ):
+            handle = await start_case(env, queue)
+            result = await handle.result()
+    assert result.final_state == CaseState.NEEDS_MORE_EVIDENCE
+    assert result.decision is None
+    assert recorder.calls["verify_status"] == 1
+    assert recorder.calls["mark_needs_evidence"] == 1
+    assert "evaluate_case" not in recorder.calls
+    assert "create_approval" not in recorder.calls

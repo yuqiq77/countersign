@@ -6,7 +6,6 @@ from countersign.policy.defaults import EXAMPLE_BANDS, SALARY_BAND_VARS, salary_
 
 _FULL = {
     "COUNTERSIGN_SALARY_CURRENCY": " eur ",
-    "COUNTERSIGN_SALARY_TRANSITION_MIN": "50000",
     "COUNTERSIGN_SALARY_ACCEPTABLE_MIN": "70000",
     "COUNTERSIGN_SALARY_ATTRACTIVE_MIN": "95000",
 }
@@ -32,11 +31,7 @@ def test_full_configuration_is_parsed_and_currency_normalized(
         monkeypatch.setenv(name, value)
     bands = salary_bands()
     assert bands.currency == "EUR"
-    assert (bands.transition_min, bands.acceptable_min, bands.attractive_min) == (
-        50000,
-        70000,
-        95000,
-    )
+    assert (bands.acceptable_min, bands.attractive_min) == (70000, 95000)
 
 
 def test_partial_configuration_refuses_instead_of_mixing_currencies(
@@ -46,7 +41,7 @@ def test_partial_configuration_refuses_instead_of_mixing_currencies(
 
     _clear(monkeypatch)
     monkeypatch.setenv("COUNTERSIGN_SALARY_CURRENCY", "EUR")
-    with pytest.raises(ValueError, match="COUNTERSIGN_SALARY_TRANSITION_MIN"):
+    with pytest.raises(ValueError, match="COUNTERSIGN_SALARY_ACCEPTABLE_MIN"):
         salary_bands()
 
 

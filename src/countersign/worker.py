@@ -7,7 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.worker import Worker
 
 from countersign.activities import ALL_ACTIVITIES
+from countersign.gateway.evaluator import profile_fingerprint
 from countersign.policy.defaults import EXAMPLE_BANDS, salary_bands
+from countersign.policy.operator_profile import PROFILE_PATH_VAR, load_operator_profile
 from countersign.runtime import TASK_QUEUE, connect_client
 from countersign.workflows.job_case import JobIntelligenceWorkflow
 
@@ -39,9 +41,22 @@ def run() -> None:
     # bands must stop the worker, not quarantine cases one evaluation at a time.
     try:
         bands = salary_bands()
+        profile = load_operator_profile()
     except ValueError as exc:
         _log.error("refusing to start: %s", exc)
         raise SystemExit(2) from exc
+    if profile is None:
+        _log.warning(
+            "operator profile: not provided (%s unset); candidate-relative judgments "
+            "will be conditional",
+            PROFILE_PATH_VAR,
+        )
+    else:
+        _log.info(
+            "operator profile: loaded, %d chars, fingerprint=%s",
+            len(profile),
+            profile_fingerprint(profile),
+        )
     if bands is EXAMPLE_BANDS:
         _log.warning(
             "salary bands: operator bands not configured; using the generic %s example, "

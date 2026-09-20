@@ -17,17 +17,15 @@ class SalaryBands:
     """Annual gross thresholds in one currency; values are policy data."""
 
     currency: str
-    transition_min: int
     acceptable_min: int
     attractive_min: int
 
     def fingerprint(self) -> str:
-        """Short stable hash of the four normalized values (policy identity)."""
+        """Short stable hash of the currency and two thresholds (policy identity)."""
 
         material = "|".join(
             (
                 self.currency,
-                str(self.transition_min),
                 str(self.acceptable_min),
                 str(self.attractive_min),
             )
@@ -37,10 +35,10 @@ class SalaryBands:
     def __post_init__(self) -> None:
         if not self.currency or self.currency != self.currency.strip().upper():
             raise ValueError(f"currency must be a non-blank upper-case code, got {self.currency!r}")
-        if not 0 < self.transition_min < self.acceptable_min < self.attractive_min:
+        if not 0 < self.acceptable_min < self.attractive_min:
             raise ValueError(
                 "thresholds must be positive and ascend: "
-                f"transition_min={self.transition_min} < acceptable_min={self.acceptable_min} "
+                f"acceptable_min={self.acceptable_min} "
                 f"< attractive_min={self.attractive_min}"
             )
 
@@ -68,6 +66,4 @@ def compute_compensation_signal(
         return CompensationSignal.ATTRACTIVE
     if amount >= bands.acceptable_min:
         return CompensationSignal.ACCEPTABLE
-    if amount >= bands.transition_min:
-        return CompensationSignal.TRANSITION_DISCOUNT
     return CompensationSignal.CONCERNING

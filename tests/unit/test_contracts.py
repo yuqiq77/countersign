@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from countersign.contracts import ContractModel, HealthResponse, JobStatus
+from countersign.contracts.workflow_io import NormalizeOutcome, VerifyOutcome
 
 
 class ExampleContract(ContractModel):
@@ -31,6 +32,21 @@ def test_health_contract_defaults() -> None:
         "status": "ok",
         "service": "countersign-api",
     }
+
+
+def test_activity_results_from_existing_workflow_histories_remain_readable() -> None:
+    NormalizeOutcome.model_validate_json(
+        '{"title":"Engineer","company_hint":null,"content_hash":"abc","extractor_version":"1.1.0"}'
+    )
+    result = VerifyOutcome.model_validate_json(
+        '{"verification":{"case_id":"case-1","status":"OPEN",'
+        '"authority":"OFFICIAL_ATS","checked_at":"2026-09-19T12:00:00Z",'
+        '"http_status":200,"final_url":"https://jobs.lever.co/example/1",'
+        '"reason":"apply markers on an official source",'
+        '"apply_markers_found":true,"closed_markers_found":false}}'
+    )
+    # Unknown in old histories must preserve their original evaluation path.
+    assert result.observed_text_chars is None
 
 
 class NumericContract(ContractModel):
