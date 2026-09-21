@@ -1,111 +1,115 @@
 # Countersign — Status
 
-Current focus, blockers, next steps, and what waits on the owner. Rewritten
-in place when any of those change; not a changelog (history: `git log`,
-`docs/adr/`; rules: `AGENTS.md`). Run-by-run evidence lives in commit
-messages; the private specifics of live runs live in the gitignored
-`HANDOFF.md`.
+Current focus, blockers, next steps, and owner decisions. Rewritten when
+these change; history lives in git and ADRs. Private live-run details stay
+in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-20 |
-| Branch | `main`, no remote yet. Profile loading, two-threshold salary policy, and extraction / empty-body fixes committed in `61fa0c6`; deployment follow-up below. |
+| As of | 2026-09-21 |
+| Branch | `main`, no remote. Code for the page reader, browser packaging, `UNVERIFIED` and human attestation is committed in `73191d7`; design and working-agreement updates are recorded separately in ADR-012 / ADR-013 and this documentation commit. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
+| Current focus | Deployment and a small live regression set for the newly committed reader and attestation path. |
 
-## Now
+## Current implementation
 
-- **Live evidence so far:** worker-kill recovery and provider-error retry
-  completed without duplicate artifacts; provider request ids are logged
-  and persisted. Direct-API runs reported prefix-cache reads; observed
-  relay runs reported writes but no reads. Profile-driven reruns corrected
-  fabricated candidate-fit claims, and configured salary bands produced a
-  deterministic compensation signal. Private run details stay in `HANDOFF.md`.
-- **Committed implementation.** (a) *Profile loading*:
-  `COUNTERSIGN_OPERATOR_PROFILE_PATH` passed through verbatim, the
-  directory mounted read-only at the same relative location in the worker,
-  no implicit default path; the prompt carries either the delimited
-  profile or the literal `Candidate profile: NOT PROVIDED.` — decided by
-  code; `prompt_version` → `evaluator/0.2.0`; an 8-hex profile fingerprint
-  in `policy_version`; the raw profile is not separately persisted or logged.
-  (b) *Salary policy*: two thresholds, three private variables, blank =
-  unset, all-or-nothing with a fail-fast at worker start, `ValueError`
-  naming the variable; `default-rubric/0.2.0`; bands fingerprint in
-  `policy_version`; salary `source_authority` / `official` stamped by code
-  from the verification. (c) *Verification fixes*: SmartRecruiters'
-  "I'm interested" in the apply markers with both apostrophes — a stopgap,
-  future work targets structural apply evidence, not more keywords;
-  JSON-LD `JobPosting` description used when visible text is empty, never
-  merged (extractor `1.2.0`); a
-  needs-evidence stop before the model (`mark_needs_evidence`, new edge
-  `OFFICIAL_SOURCE_VERIFIED → NEEDS_MORE_EVIDENCE`, reason audited).
-  Old Temporal activity results remain readable: absent text length keeps
-  the original evaluation path on replay.
-- **Commit verification, 2026-09-20:** each code / docs commit checked in
-  a fresh detached worktree and venv: `ruff check .` and
-  `ruff format --check .` clean (89 files),
-  `pyright` 0 errors, `lint-imports` 3/3 kept, `pytest` 106 passed with
-  no skips per commit. PostgreSQL integration used the disposable
-  `countersign_review` / `countersign_review_docs` databases at
-  `127.0.0.1:51479`; other fixtures used SQLite.
-  `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build` passed.
-  Running stack: profile loading and the two-threshold policy are deployed
-  by the owner; the extraction / empty-body fixes still need deployment
-  and live reruns. No live model calls were made during this review.
-- **Known gaps:** JSON-LD fallback supplies posting text for evaluation;
-  it does not itself prove a job is open. Ashby pages without recognized
-  apply evidence still verify `UNKNOWN_STALE_RISK`; adapter work remains.
-  The web detail page shows a case's state but not its recorded reason (`QUARANTINED`,
-  `NEEDS_MORE_EVIDENCE`; reasons are in the audit log). Recreate the
-  Compose stack whole (`up --build -d`), never a service list — a partial
-  update left the Temporal UI attached to the old Temporal container.
+- **Reader (ADR-012):** one loop inside `verify_status`, with DONE, FOLLOW
+  of an observed link, and RENDER of the current page. Each observation
+  exposes at most **120 controls**, deduplicated by target (by label for
+  target-less buttons), in document order; `controls_truncated` marks a
+  cut. Bounds are **120 seconds** after the initial fetch, three model
+  steps, two follows and one schema repair per step. Reader prompt:
+  `page-reader/0.2.0`; the Activity's outer timeout remains three minutes.
+- **Pre-render:** when the first page has **no visible HTML text and no
+  controls**, code renders once before the model and records step 0.
+  This also applies when JSON-LD already supplies the posting body. The
+  model still interprets the result; no keyword or candidate-ranking
+  fallback manufactures an apply entry. Provider outages retry the Activity
+  rather than persist an outage-derived verdict.
+- **Evidence and provenance:** control labels and targets are checked
+  together; claims on superseded pages must also hold on their replacement.
+  Pages are classified independently: official first, then closed/expired,
+  then the verified apply entry, then the latest observation. Verification
+  pins the governing source; evaluation, salary-source stamping, approval
+  pinning and case detail use the selected posting body. Snapshot identity
+  includes URLs, HTTP status and content.
+- **Browser packaging:** the Dockerfile installs Chromium through Playwright
+  and Compose uses the image's fixed browser path. Host runs supply
+  `COUNTERSIGN_CHROMIUM_PATH` or run without rendering. Rendering permits
+  only the vetted page host and referenced subdomains, GET/HEAD only;
+  service workers and WebSockets are blocked. Synchronous DNS/library
+  calls are not forcibly cancelled by the reading budget.
+- **Verification and approval (ADR-013):** `UNVERIFIED` replaces
+  `UNKNOWN_STALE_RISK`; evaluator prompt is `evaluator/0.2.1`. Plain APPROVE
+  requires verified OPEN. On UNVERIFIED or OPEN_THIRD_PARTY_ONLY, a reviewer
+  can approve with a typed attestation and a note of what they observed.
+  The API checks the verification pinned to the request; CLOSED, EXPIRED
+  and a missing verification cannot be attested. The decision and
+  `human.verification_attested` audit event are stored together. The UI
+  explains verification status and separates attested approval; model
+  confidence remains in the contract but is no longer displayed.
+- **Schema:** unreleased migration `0001` includes `page_readings`,
+  verification `reading_id`, attestation fields and the revised snapshot
+  identity. The enum rename also affects stored payloads and Temporal
+  histories. Deployment requires a fresh schema/history, not an in-place
+  upgrade of the current stack. No existing deployment data was changed.
+
+## Verification and deployment
+
+Code commit `73191d7` was checked in a fresh detached worktree and Python
+venv, with front-end dependencies installed from `pnpm-lock.yaml`:
+
+- `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
+  97 Python files; `.venv/bin/pyright`: 0 errors;
+  `.venv/bin/lint-imports`: 3 contracts kept.
+- `.venv/bin/pytest`: **154 passed, no skips**. PostgreSQL integration used
+  disposable database `countersign_code_check` at `127.0.0.1:61661` in a
+  separate temporary container. Other database fixtures used SQLite;
+  Temporal used its test server; rendering used real local Chromium.
+  Private profile and salary environment inputs were unset for this run.
+- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+- Changed and new files were checked for operator-specific identifiers,
+  credential-like values and private paths; no matches. Private files
+  remain ignored and untracked. A full gitleaks scan remains a publication
+  prerequisite.
+- `docker build -t countersign-commit-check:20260921 .`: **blocked** by a
+  timeout fetching `docker.io/library/python:3.12-slim` metadata, before
+  installation began. Browser packaging is implemented but the resulting
+  container image has not been verified in this run.
+
+The running Compose stack predates these changes. No live model calls
+were made during this commit round. Earlier owner-driven runs cover the
+profile, salary policy, extraction fallback and empty-body handling;
+worker-kill recovery and provider-error retry also have live evidence.
 
 ## Next
 
-1. Owner recreates the stack and re-runs the two Ashby and the
-   SmartRecruiters cases: the Ashby pages should evaluate on their JSON-LD
-   description, the SmartRecruiters posting should verify `OPEN`.
-2. Make the repository public: run gitleaks once, inspect the tree for
-   private identifiers (see `AGENTS.md` constraints), and have the owner
-   add the remote and push.
-3. **Slice 2 — governed intelligence** (timebox 3 weeks, kill rules in v4
-   §24): watchlist as a policy artifact including company → official-domain
-   mapping (this is what unlocks `OFFICIAL_COMPANY`); Greenhouse + Lever
-   adapters; scan-report import; scheduled scans + stale rechecks;
-   capability-registry policy enforcement; gateway route registry; anchor
-   calibration cards; OTel traces + cost dashboard. Structural apply
-   evidence per ATS belongs to the adapters. Exit = Claim Level 1 (§25) +
-   scheduled scans running. Tickets under `docs/tickets/` start here: one
-   per workstream, cut and owner-read before code.
-4. **Slice 2.5 — company-research loop** per ADR-011, after Slice 2
-   (registry enforcement and the gateway route registry are prerequisites).
-   Kill rule: the `CompanyProfile` schema ships regardless; an
-   operator-filled profile is the degraded mode.
-5. v4 edits, owner-reserved and one line each: §9 diagram gains
-   `OFFICIAL_SOURCE_VERIFIED --> NEEDS_MORE_EVIDENCE`; §15 / §24 / §29
-   mention the research loop when Slice 2.5 nears.
+1. Once base-image fetching works, build the image and confirm Chromium
+   launches inside it. Recreate the Compose stack as a whole with fresh
+   unreleased database/history state, then check direct ATS, board → ATS,
+   a client-rendered shell, and one attested approval against real cases.
+2. Before publication, run gitleaks and inspect tracked content. The owner
+   adds the remote and pushes.
+3. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
+   mapping, ATS adapters, scans and stale rechecks, capability/route
+   registries, calibration, traces and cost dashboard. Tickets are
+   owner-read before implementation. Slice 2.5 research follows ADR-011
+   once registry prerequisites exist.
 
-## Waiting on the owner
+## Remaining gaps and owner decisions
 
-- **Rubric follow-ups, golden set first.** Whether the no-profile mode
-  gets nullable candidate-specific scores (`int | None`,
-  `seniority_fit=UNASSESSABLE`) in Slice 2; whether a HARD blocker should
-  bind the decision band (one HARD location blocker led to `SKIP`, another
-  to `STRETCH`) — a prompt rule keeps the human in the loop, a domain gate
-  would also amplify a mislabelled blocker; tightening the compensation
-  rule to "no risk flags about pay level"; whether technical
-  responsibility and coordination work are separated correctly once a
-  profile is present (`drift_risk` penalizes coordination by definition).
-  The over-enthusiasm regression case is the 2026-09-19 posting re-run on
-  2026-09-20.
-- **Usage accounting.** An unexplained input-token outlier and the lack
-  of cache reads in observed relay runs remain follow-ups; evidence is in
-  `HANDOFF.md`. The Slice 2 cost dashboard must price uncached input,
-  cache writes, cache reads, and output separately using the route's rates.
-
-## Recently done (pointers only)
-
-Slice 1 commit series + ADR-011 (`git log b87cb11..44f54da`); delivery and
-working-agreement updates (`git log 44f54da..a79236c`); Track A follow-up
-(`a80ac12`); formatting cleanup and CI gate (`89730d4`); salary-policy
-foundation (`0ec1882`); profile loading, two-threshold policy, and
-verification fixes (`61fa0c6`).
+- Authority classification is unchanged: company pages require official
+  domain mapping; several boards still fall into COMPANY_CONTROLLED and
+  TRUSTED_BOARD_REDIRECT is not assigned. Whether board evidence alone
+  permits an unattested APPROVE remains a separate policy decision.
+- Cross-host script dependencies can prevent complete rendering. Citation
+  checks establish provenance, not semantic correctness; the reader still
+  needs the live regression set above.
+- Attestation is visible in the decision row and audit log, not yet on the
+  case page. Case-state reasons for quarantine/needs-evidence remain in the
+  audit log; verification reasons are shown in the UI.
+- Rubric decisions remain: no-profile score nullability, hard blockers and
+  decision bands, pay-level risk wording, technical versus coordination
+  work. Usage outliers and relay cache accounting remain in `HANDOFF.md`.
+- Owner-reserved v4 edits: §9 needs-evidence edge; §12 / §14 old status name;
+  §12 / §15 reader; §15 / §24 / §29 research loop when Slice 2.5 nears.

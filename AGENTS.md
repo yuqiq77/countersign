@@ -96,6 +96,19 @@ them.
   a verified `OPEN`; a company-controlled page stalls at
   `OPEN_THIRD_PARTY_ONLY` until the Slice 2 watchlist maps company →
   official domains. That is not a bug; do not add host or path heuristics.
+- **The page reader is the only model-driven navigation** (ADR-012). Its
+  moves are `RENDER` and `FOLLOW`, both read-only and allowlisted by
+  construction; its claims count only after source/citation checks,
+  including the observed control-label/target pair;
+  its budgets live in `ReaderConfig`, never in the prompt. The one
+  code-initiated render is the recorded step-0 pre-render of a shell page
+  (no visible HTML text and no controls). Do not add a move, widen the allowlist,
+  or let a model claim bypass the check without a new ADR.
+- **The approval gate is server-owned** (ADR-013). `APPROVE` on an
+  unverified posting needs a typed human attestation, re-checked by the
+  API against the verification pinned to the request. Do not widen the
+  gate in the UI, infer an apply entry in code to avoid it, or let an
+  attestation reopen a `CLOSED`/`EXPIRED` verification.
 - **Import boundaries are enforced by import-linter**: `contracts` imports
   nothing internal; `workflows` imports only `contracts` and `domain`;
   `domain` imports only `contracts`. Workflow code reaches Activities only

@@ -80,7 +80,11 @@ web UI (:3001). All host ports bind to 127.0.0.1.
 The worker defaults to the deterministic fake model; set
 `COUNTERSIGN_MODEL_PROVIDER=anthropic`, `COUNTERSIGN_MODEL_ID`, and
 `ANTHROPIC_API_KEY` for live evaluations. Anthropic-compatible relays can set
-`ANTHROPIC_BASE_URL`. The evaluator judges fit against an operator profile
+`ANTHROPIC_BASE_URL`. The unscripted fake reader leaves status unknown.
+Rendering uses Playwright and a Chromium binary named by
+`COUNTERSIGN_CHROMIUM_PATH`; the Compose image installs one and sets the
+path itself, host runs name their own or run without rendering.
+The evaluator judges fit against an operator profile
 only when `COUNTERSIGN_OPERATOR_PROFILE_PATH` names one — a gitignored
 Markdown file under `config/operator/`, given as a repository-relative path;
 Compose mounts that directory read-only at the same relative location in the
@@ -103,12 +107,21 @@ Implemented (Slice 1 — one durable case):
 - paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
 - `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
   durable approval Signal wait, with quarantine/closed/expiry paths and a
-  needs-evidence stop before the model when the verified page has no
+  needs-evidence stop before fit evaluation when the reader found no
   posting text;
 - SSRF-guarded fetch, deterministic HTML normalization (visible text, or
   the JSON-LD `JobPosting` description when a client-rendered page has
-  none), authority-aware
-  official-status verification (never inferred from HTTP 200 alone);
+  none), and a bounded page reader in front of verification (ADR-012): the
+  model reads a dossier of page facts and may render the page or follow a
+  listed link, within code-enforced budgets; cited controls must match
+  their labels and targets, and status uses one observation's own HTTP
+  response, authority and evidence. Model failures leave no inferred apply
+  entry; HTTP 200 alone never proves OPEN. Chromium rendering records
+  actual navigation metadata;
+- a code-enforced approval gate: a plain APPROVE needs a verified official
+  OPEN; on an unverified posting the reviewer may approve only with a typed
+  attestation of what they saw, re-checked by the API and audited as its
+  own human event (ADR-013);
 - thin model gateway: structured output against the Pydantic contract,
   bounded schema-repair retry, token/latency/version capture; deterministic
   fake provider for tests and model-free runs;
