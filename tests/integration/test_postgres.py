@@ -89,3 +89,50 @@ def test_full_repo_cycle_with_real_column_widths() -> None:
         # PostgreSQL round-trips timezone-aware datetimes.
         view = repo.approval_view(request)
         assert view.expires_at.tzinfo is not None
+
+
+@pytest.mark.usefixtures("postgres_db")
+def test_identical_bodies_preserve_each_sources_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy import func, select
+
+    from countersign.activities.case_activities import snapshot_source
+    from countersign.capabilities.http_fetch import FetchResult
+    from countersign.contracts.workflow_io import CaseWorkflowInput
+    from countersign.persistence.models import SourceSnapshotRow
+
+    body = b'<p>Engineer</p><a href="/apply">Apply</a>'
+    response_status = [200]
+
+    def fetch(url: str, **_: object) -> FetchResult:
+        return FetchResult(
+            requested_url=url,
+            final_url=url,
+            http_status=response_status[0],
+            content_type="text/html",
+            body=body,
+            redirect_chain=[],
+        )
+
+    monkeypatch.setattr("countersign.activities.case_activities.fetch_url", fetch)
+    case_id = str(uuid.uuid4())
+    board = CaseWorkflowInput(case_id=case_id, url="https://board.example/jobs/1")
+    official = board.model_copy(update={"url": "https://jobs.lever.co/acme/1"})
+    first = snapshot_source(board).snapshot
+    second = snapshot_source(official).snapshot
+    response_status[0] = 503
+    third = snapshot_source(official).snapshot
+    repeat = snapshot_source(official).snapshot
+    assert len({s.snapshot_id for s in (first, second, third)}) == 3
+    assert repeat.snapshot_id == third.snapshot_id
+    with session_scope() as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(SourceSnapshotRow)
+                .where(SourceSnapshotRow.case_id == case_id)
+            )
+            == 3
+        )
+        stored = repo.get_snapshot(session, third.snapshot_id)
+        assert stored is not None and stored.http_status == 503
+        assert stored.final_url == official.url

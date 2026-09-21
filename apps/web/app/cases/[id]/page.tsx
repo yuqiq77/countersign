@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { getCase, submitDecision, type CaseDetail } from "../../../lib/api";
+import {
+  getCase,
+  submitDecision,
+  type Attestation,
+  type CaseDetail,
+} from "../../../lib/api";
 
 const SCORE_KEYS = [
   ["skill_capital", "Skill capital"],
@@ -25,6 +30,20 @@ const IN_FLIGHT_STATES = new Set([
   "EVALUATED",
   "PENDING_APPROVAL",
 ]);
+
+// What each verification status means for the reviewer. The enum value stays
+// visible beside it; the recorded reason follows on the next line.
+const STATUS_COPY: Record<string, string> = {
+  OPEN: "Open — application entry confirmed on an official source",
+  OPEN_THIRD_PARTY_ONLY: "Open on a non-official source only",
+  UNVERIFIED: "Not verified — no application entry confirmed on an official source",
+  CLOSED: "Closed",
+  EXPIRED: "Expired",
+};
+
+// A closed or expired posting is never attestable (ADR-013); the workflow
+// closes such cases before approval, so this is a guard, not a path.
+const NEVER_ATTESTABLE = new Set(["CLOSED", "EXPIRED"]);
 
 const DECISION_LABELS: Record<string, { label: string; className: string }> = {
   APPROVE: {
@@ -48,6 +67,8 @@ export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [reason, setReason] = useState("");
+  const [attest, setAttest] = useState(false);
+  const [attestNote, setAttestNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,14 +91,19 @@ export default function CaseDetailPage() {
     return () => clearInterval(timer);
   }, [refresh, inFlight]);
 
-  async function decide(decision: string) {
+  async function decide(decision: string, attestation?: Attestation) {
     if (!detail?.approval || !reason.trim()) {
       setError("A reason is required for every decision.");
       return;
     }
     setBusy(true);
     try {
-      await submitDecision(detail.approval.approval_request_id, decision, reason.trim());
+      await submitDecision(
+        detail.approval.approval_request_id,
+        decision,
+        reason.trim(),
+        attestation,
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -97,6 +123,12 @@ export default function CaseDetailPage() {
   const evaluation = detail.evaluation?.evaluation;
   const canDecide =
     detail.state === "PENDING_APPROVAL" && detail.approval?.status === "PENDING";
+  const approveAllowed = detail.approval?.allowed_decisions.includes("APPROVE") ?? false;
+  const attestable =
+    canDecide &&
+    !approveAllowed &&
+    detail.verification !== null &&
+    !NEVER_ATTESTABLE.has(detail.verification.status);
 
   return (
     <main className="mx-auto max-w-4xl space-y-8 px-6 py-12 text-sm">
@@ -144,6 +176,9 @@ export default function CaseDetailPage() {
                       : "text-amber-400"
                   }
                 >
+                  {STATUS_COPY[detail.verification.status] ?? detail.verification.status}
+                </span>{" "}
+                <span className="text-xs text-neutral-500">
                   {detail.verification.status}
                 </span>
               </div>
@@ -185,8 +220,7 @@ export default function CaseDetailPage() {
             ) : null}{" "}
             · Seniority:{" "}
             {evaluation.seniority_fit} · Compensation:{" "}
-            {detail.evaluation.compensation_signal} · Confidence:{" "}
-            {Math.round(evaluation.confidence * 100)}%
+            {detail.evaluation.compensation_signal}
           </p>
           <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {SCORE_KEYS.map(([key, label]) => (
@@ -261,11 +295,49 @@ export default function CaseDetailPage() {
                   );
                 })}
               </div>
-              {!detail.approval.allowed_decisions.includes("APPROVE") ? (
+              {!approveAllowed ? (
                 <p className="text-xs text-amber-400">
-                  Plain approval is gated: the official status is not verified
-                  OPEN.
+                  Plain approval is gated: no application entry was confirmed on
+                  an official source.
                 </p>
+              ) : null}
+              {attestable ? (
+                /* ADR-013: the reviewer may sign for an unverified posting
+                   themselves. The server re-checks the gate with the
+                   attestation and records it as its own audit event. */
+                <div className="space-y-2 rounded-xl border border-amber-700 p-4">
+                  <label className="flex items-center gap-2 text-neutral-300">
+                    <input
+                      type="checkbox"
+                      checked={attest}
+                      onChange={(e) => setAttest(e.target.checked)}
+                    />
+                    I verified this posting is open myself
+                  </label>
+                  <input
+                    value={attestNote}
+                    onChange={(e) => setAttestNote(e.target.value)}
+                    disabled={!attest}
+                    placeholder="What you saw, e.g. the application form loaded and accepted input today (recorded in the audit log)"
+                    className="w-full rounded-xl border border-neutral-700 bg-transparent px-4 py-2 outline-none focus:border-amber-500 disabled:opacity-50"
+                  />
+                  <button
+                    onClick={() =>
+                      void decide("APPROVE", {
+                        observed_open: true,
+                        note: attestNote.trim(),
+                      })
+                    }
+                    disabled={busy || !attest || !attestNote.trim()}
+                    className="rounded-xl border border-amber-600 px-5 py-2 font-medium text-amber-300 disabled:opacity-50"
+                  >
+                    Approve on my own attestation
+                  </button>
+                  <p className="text-xs text-neutral-500">
+                    The decision reason above is still required. The attestation is
+                    recorded as a separate human event.
+                  </p>
+                </div>
               ) : null}
             </div>
           ) : (

@@ -203,7 +203,9 @@ def test_salary_source_facts_are_stamped_from_verification() -> None:
         summary="canned",
     )
 
-    def run_with(authority: SourceAuthority) -> SalaryExtraction:
+    def run_with(
+        authority: SourceAuthority, body_authority: SourceAuthority | None = None
+    ) -> SalaryExtraction:
         record = run_evaluation(
             FakeEvaluationProvider(canned=canned),
             case_id="case-1",
@@ -212,6 +214,7 @@ def test_salary_source_facts_are_stamped_from_verification() -> None:
             title="Engineer",
             text="A job posting body.",
             verification=verification(authority),
+            source_authority=body_authority,
             bands=BANDS,
         )
         assert record.evaluation.salary_extraction is not None
@@ -225,3 +228,23 @@ def test_salary_source_facts_are_stamped_from_verification() -> None:
     company_page = run_with(SourceAuthority.COMPANY_CONTROLLED)
     assert company_page.source_authority == SourceAuthority.COMPANY_CONTROLLED
     assert company_page.official is False
+
+    board_body = run_with(SourceAuthority.OFFICIAL_ATS, SourceAuthority.COMPANY_CONTROLLED)
+    assert board_body.source_authority == SourceAuthority.COMPANY_CONTROLLED
+    assert board_body.official is False
+
+
+def test_transport_failure_is_not_repaired_or_quarantined(monkeypatch: pytest.MonkeyPatch) -> None:
+    from countersign.gateway.provider import ProviderResponse, ProviderUnavailable
+
+    provider = FakeEvaluationProvider()
+    calls: list[str] = []
+
+    def unavailable(*, system: str, user: str) -> ProviderResponse:
+        calls.append(user)
+        raise ProviderUnavailable("offline")
+
+    monkeypatch.setattr(provider, "evaluate", unavailable)
+    with pytest.raises(ProviderUnavailable):
+        run(provider)
+    assert len(calls) == 1

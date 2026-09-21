@@ -14,6 +14,7 @@ from countersign.persistence.models import (
     BlobRow,
     EvaluationRunRow,
     HumanDecisionRow,
+    PageReadingRow,
     SourceSnapshotRow,
     VerificationRow,
 )
@@ -25,6 +26,7 @@ DIGEST = "f" * 64
 SAMPLES = [
     (SourceSnapshotRow.__table__.c.id, f"snap-{CASE_ID[:8]}-{DIGEST[:16]}"),
     (VerificationRow.__table__.c.id, f"ver-{CASE_ID}-g999"),
+    (PageReadingRow.__table__.c.id, f"read-{CASE_ID}-g999"),
     (EvaluationRunRow.__table__.c.id, f"eval-{CASE_ID[:8]}-{DIGEST[:16]}"),
     (ApprovalRequestRow.__table__.c.id, f"appr-{CASE_ID}-g999"),
     (HumanDecisionRow.__table__.c.id, f"dec-appr-{CASE_ID}-g999-v999"),

@@ -49,7 +49,6 @@ class BlobRow(Base):
 
 class SourceSnapshotRow(Base):
     __tablename__ = "source_snapshots"
-    __table_args__ = (UniqueConstraint("case_id", "content_hash", name="uq_snapshot_case_hash"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
@@ -84,6 +83,20 @@ class VerificationRow(Base):
     observed_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     content_changed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     snapshot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reading_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class PageReadingRow(Base):
+    """One bounded page reading: observations, verified claims, trail (ADR-012)."""
+
+    __tablename__ = "page_readings"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("job_cases.id"), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    stop_reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class EvaluationRunRow(Base):
@@ -135,6 +148,10 @@ class HumanDecisionRow(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     actor: Mapped[str] = mapped_column(String(128), nullable=False)
     decision_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ADR-013: the reviewer signed for an unverified posting themselves.
+    # The note is the evidence they saw; it is also the audit event's reason.
+    attested_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    attestation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

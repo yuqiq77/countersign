@@ -8,9 +8,51 @@ class JobStatus(StrEnum):
 
     OPEN = "OPEN"
     OPEN_THIRD_PARTY_ONLY = "OPEN_THIRD_PARTY_ONLY"
-    UNKNOWN_STALE_RISK = "UNKNOWN_STALE_RISK"
+    UNVERIFIED = "UNVERIFIED"
     CLOSED = "CLOSED"
     EXPIRED = "EXPIRED"
+
+
+class ApplyEntryKind(StrEnum):
+    """How the reader identified an application entry."""
+
+    JSON_LD_DIRECT_APPLY = "JSON_LD_DIRECT_APPLY"
+    ATS_LINK = "ATS_LINK"
+    APPLY_CONTROL = "APPLY_CONTROL"
+    MAILTO = "MAILTO"
+    TEXT_MARKER = "TEXT_MARKER"
+
+
+class EvidenceKind(StrEnum):
+    """What a cited page span proves about the posting's status."""
+
+    CLOSED_NOTICE = "CLOSED_NOTICE"
+    VALID_THROUGH = "VALID_THROUGH"
+
+
+class ObservationHow(StrEnum):
+    """How the reader obtained one page observation."""
+
+    STATIC = "STATIC"
+    RENDERED = "RENDERED"
+    FOLLOWED = "FOLLOWED"
+
+
+class ReaderAction(StrEnum):
+    """The only moves the page reader may request; code executes them."""
+
+    DONE = "DONE"
+    RENDER = "RENDER"
+    FOLLOW = "FOLLOW"
+
+
+class ReaderStop(StrEnum):
+    """Why a page reading ended — always recorded, never inferred."""
+
+    DONE = "DONE"
+    STEP_BUDGET = "STEP_BUDGET"
+    WALL_CLOCK = "WALL_CLOCK"
+    MODEL_FAILURE = "MODEL_FAILURE"
 
 
 class SourceAuthority(StrEnum):

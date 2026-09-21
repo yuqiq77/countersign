@@ -1,4 +1,4 @@
-"""Deterministic normalization: HTML to text facts, with cited markers.
+"""Deterministic normalization: HTML to posting text and source facts.
 
 Pure functions over fetched bytes — no I/O, no model calls. The extractor
 is versioned so results are reproducible (v4 §12).
@@ -17,33 +17,6 @@ EXTRACTOR_NAME = "html-text"
 EXTRACTOR_VERSION = "1.2.0"
 
 _SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "head"})
-
-# Fixed phrases are a stopgap, not a strategy: matching text anywhere in a
-# page is blunt. Improvements go toward structural evidence — the actual
-# apply button or link, JSON-LD `directApply` — never toward a longer list
-# of fuzzy keywords. The last two are SmartRecruiters' apply-button label,
-# with both apostrophes the sites use.
-_APPLY_MARKERS = (
-    "apply now",
-    "apply for this job",
-    "apply for this position",
-    "submit application",
-    "submit your application",
-    "apply today",
-    "jetzt bewerben",
-    "i'm interested",
-    "i\u2019m interested",
-)
-
-_CLOSED_MARKERS = (
-    "no longer accepting applications",
-    "no longer available",
-    "position has been filled",
-    "this job is closed",
-    "job posting has expired",
-    "this posting has expired",
-    "diese stelle ist nicht mehr verf",
-)
 
 _ATS_HOSTS = (
     "boards.greenhouse.io",
@@ -113,15 +86,16 @@ class Normalized:
     company_hint: str | None
     text: str
     content_hash: str
-    apply_markers_found: bool
-    closed_markers_found: bool
     # Where the text came from: "html" (visible text), "json-ld" (the
     # JobPosting description, used only when the visible text is empty), or
-    # "none" (neither — the pipeline stops before the model on this).
+    # "none" (neither — the reader can still try navigation or rendering).
     text_source: str
+    # The first JSON-LD `JobPosting` object on the page, when one parses;
+    # the page reader's dossier summarises it from here.
+    job_posting: dict[str, Any] | None = None
 
 
-def _job_posting(parts: list[str]) -> dict[str, Any] | None:
+def extract_job_posting(parts: list[str]) -> dict[str, Any] | None:
     """The first JSON-LD object typed JobPosting, searching lists and @graph."""
 
     def walk(node: Any) -> dict[str, Any] | None:
@@ -176,8 +150,8 @@ def normalize_html(body: bytes) -> Normalized:
     title = extractor.og_title or "".join(extractor.title_parts).strip() or None
     company_hint = extractor.site_name
     text_source = "html" if text else "none"
+    posting = extract_job_posting(extractor.ldjson_parts)
     if not text:
-        posting = _job_posting(extractor.ldjson_parts)
         if posting is not None:
             description = posting.get("description")
             if isinstance(description, str):
@@ -190,15 +164,13 @@ def normalize_html(body: bytes) -> Normalized:
                 name: Any = cast(dict[str, Any], organization).get("name")
                 if isinstance(name, str) and name.strip():
                     company_hint = name.strip()
-    lowered = text.lower()
     return Normalized(
         title=title,
         company_hint=company_hint,
         text=text,
         content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        apply_markers_found=any(marker in lowered for marker in _APPLY_MARKERS),
-        closed_markers_found=any(marker in lowered for marker in _CLOSED_MARKERS),
         text_source=text_source,
+        job_posting=posting,
     )
 
 

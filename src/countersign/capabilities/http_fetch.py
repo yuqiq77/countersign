@@ -9,6 +9,7 @@ never instructions.
 
 import ipaddress
 import socket
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -99,13 +100,35 @@ def _vetted_address(url: httpx.URL) -> _IPAddress:
     return addresses[0]
 
 
+def vetted_addresses(url: str) -> list[str]:
+    """Every address the host resolves to, all validated, IPv4 first.
+
+    Chromium's host-resolver rules accept IPv4 literals reliably; callers
+    that build such rules take the first entry.
+    """
+
+    host = httpx.URL(url).host
+    addresses = _resolved_addresses(host)
+    for address in addresses:
+        _validate_address(address)
+    ordered = sorted(addresses, key=lambda a: a.version)  # 4 before 6
+    return [str(a) for a in ordered]
+
+
 def assert_url_allowed(url: str) -> None:
     """Reject URLs whose scheme or destination violates network policy."""
 
     _vetted_address(httpx.URL(url))
 
 
-def _read_limited(response: httpx.Response) -> bytes:
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise httpx.TimeoutException("fetch budget exhausted")
+    return min(TIMEOUT_SECONDS, remaining)
+
+
+def _read_limited(response: httpx.Response, deadline: float) -> bytes:
     """Stream the body, aborting as soon as the size limit is exceeded."""
 
     declared = response.headers.get("content-length")
@@ -118,6 +141,7 @@ def _read_limited(response: httpx.Response) -> bytes:
     total = 0
     chunks: list[bytes] = []
     for chunk in response.iter_bytes():
+        _remaining(deadline)
         total += len(chunk)
         if total > MAX_BODY_BYTES:
             raise FetchPolicyError(f"response body exceeds {MAX_BODY_BYTES} bytes")
@@ -130,6 +154,7 @@ def fetch_url(
     *,
     transport: httpx.BaseTransport | None = None,
     enforce_network_policy: bool = True,
+    timeout_seconds: float = TIMEOUT_SECONDS,
 ) -> FetchResult:
     """Fetch a URL with per-hop validation pinned to the vetted address.
 
@@ -140,6 +165,7 @@ def fetch_url(
     connection. `transport` and `enforce_network_policy` exist for tests.
     """
 
+    deadline = time.monotonic() + timeout_seconds
     chain: list[str] = []
     current = url
     client = _client_for(transport)
@@ -158,7 +184,9 @@ def fetch_url(
             target = logical
             headers = {"User-Agent": "countersign/0.1"}
             extensions = {}
-        with client.stream("GET", target, headers=headers, extensions=extensions) as response:
+        with client.stream(
+            "GET", target, headers=headers, extensions=extensions, timeout=_remaining(deadline)
+        ) as response:
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get("location")
                 if not location:
@@ -166,7 +194,7 @@ def fetch_url(
                 chain.append(current)
                 current = str(logical.join(location))
                 continue
-            body = _read_limited(response)
+            body = _read_limited(response, deadline)
             content_type = response.headers.get("content-type", "application/octet-stream")
             base_type = content_type.split(";", 1)[0].strip().lower()
             if response.status_code < 400 and not base_type.startswith(_ALLOWED_CONTENT_PREFIXES):

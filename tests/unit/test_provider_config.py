@@ -113,3 +113,30 @@ def test_request_id_is_read_from_the_sdk_response() -> None:
 
     assert request_id_of(_Response()) == "req_123"
     assert request_id_of(_NoId()) is None
+
+
+def test_sdk_transport_failure_is_unavailable_and_bounded_without_hidden_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from countersign.contracts.page_reading import PageStep
+    from countersign.gateway.provider import ProviderUnavailable
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    requests: list[httpx.Request] = []
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ConnectError("offline", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(fail)) as http_client:
+        client = anthropic.Anthropic(api_key="test-key", http_client=http_client)
+        provider = AnthropicProvider("test-model")
+        monkeypatch.setattr(provider, "_client", client)
+        with pytest.raises(ProviderUnavailable):
+            provider.parse(system="test", user="test", output_type=PageStep, timeout_seconds=0.25)
+    assert len(requests) == 1
+    assert requests[0].extensions["timeout"] == dict.fromkeys(
+        ("connect", "read", "write", "pool"), 0.25
+    )

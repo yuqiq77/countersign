@@ -9,10 +9,10 @@ from countersign.contracts.enums import JobStatus, SourceAuthority
 class VerificationResult(ContractModel):
     """Official application status at a point in time, with its evidence.
 
-    The verification is a persisted second observation, not just a probe:
-    `snapshot_id` binds it to the stored re-observation body, and
-    `content_changed` compares normalized text against the first snapshot so
-    an approval never silently pairs old content with new status.
+    `snapshot_id` and `observed_content_hash` bind to the response governing
+    status. The reading separately identifies the posting body used for
+    evaluation; `content_changed` compares that body's normalized text to
+    the preceding body snapshot (the intake snapshot on the first run).
     """
 
     case_id: str
@@ -27,3 +27,6 @@ class VerificationResult(ContractModel):
     observed_content_hash: str | None = None
     content_changed: bool | None = None
     snapshot_id: str | None = None
+    # The bounded page reading this verification was derived from (ADR-012);
+    # None for verifications made before the reader existed.
+    reading_id: str | None = None

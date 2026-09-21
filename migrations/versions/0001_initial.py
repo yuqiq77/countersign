@@ -54,7 +54,6 @@ def upgrade() -> None:
         sa.Column("extractor_version", sa.String(32), nullable=False),
         sa.Column("redirect_chain", sa.JSON(), nullable=False),
         sa.Column("request_trace_id", sa.String(64), nullable=True),
-        sa.UniqueConstraint("case_id", "content_hash", name="uq_snapshot_case_hash"),
     )
     op.create_table(
         "verification_records",
@@ -71,6 +70,16 @@ def upgrade() -> None:
         sa.Column("observed_content_hash", sa.String(64), nullable=True),
         sa.Column("content_changed", sa.Boolean(), nullable=True),
         sa.Column("snapshot_id", sa.String(64), nullable=True),
+        sa.Column("reading_id", sa.String(64), nullable=True),
+    )
+    op.create_table(
+        "page_readings",
+        sa.Column("id", sa.String(64), primary_key=True),
+        sa.Column("case_id", sa.String(36), sa.ForeignKey("job_cases.id"), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("prompt_version", sa.String(64), nullable=False),
+        sa.Column("stop_reason", sa.String(32), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_table(
         "evaluation_runs",
@@ -110,6 +119,8 @@ def upgrade() -> None:
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("actor", sa.String(128), nullable=False),
         sa.Column("decision_version", sa.Integer(), nullable=False),
+        sa.Column("attested_open", sa.Boolean(), nullable=False),
+        sa.Column("attestation_note", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint(
             "approval_request_id", "decision_version", name="uq_decision_request_version"
@@ -145,6 +156,7 @@ def downgrade() -> None:
     op.drop_table("human_decisions")
     op.drop_table("approval_requests")
     op.drop_table("evaluation_runs")
+    op.drop_table("page_readings")
     op.drop_table("verification_records")
     op.drop_table("source_snapshots")
     op.drop_table("blobs")

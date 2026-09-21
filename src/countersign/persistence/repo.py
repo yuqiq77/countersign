@@ -21,6 +21,7 @@ from countersign.contracts.enums import (
     SourceAuthority,
 )
 from countersign.contracts.evaluation import EvaluationRecord
+from countersign.contracts.page_reading import PageReadingRecord
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
 from countersign.domain.states import assert_transition, can_transition, is_retry_noop
@@ -31,6 +32,7 @@ from countersign.persistence.models import (
     HumanDecisionRow,
     IdempotencyRow,
     JobCaseRow,
+    PageReadingRow,
     SourceSnapshotRow,
     VerificationRow,
 )
@@ -211,13 +213,9 @@ def case_summary(row: JobCaseRow) -> CaseSummary:
 
 
 def record_snapshot(session: Session, record: SnapshotRecord) -> str:
-    """Persist a snapshot; a repeat with the same content hash is a no-op."""
+    """Persist a snapshot; its ID binds response provenance as well as content."""
 
-    stmt = select(SourceSnapshotRow).where(
-        SourceSnapshotRow.case_id == record.case_id,
-        SourceSnapshotRow.content_hash == record.content_hash,
-    )
-    existing = session.scalars(stmt).first()
+    existing = session.get(SourceSnapshotRow, record.snapshot_id)
     if existing is not None:
         return existing.id
     session.add(
@@ -249,8 +247,34 @@ def latest_snapshot(session: Session, case_id: str) -> SnapshotRecord | None:
         .order_by(SourceSnapshotRow.retrieved_at.desc())
     )
     row = session.scalars(stmt).first()
-    if row is None:
-        return None
+    return None if row is None else _snapshot_record(row)
+
+
+def get_snapshot(session: Session, snapshot_id: str) -> SnapshotRecord | None:
+    row = session.get(SourceSnapshotRow, snapshot_id)
+    return None if row is None else _snapshot_record(row)
+
+
+def body_snapshot(session: Session, case_id: str) -> SnapshotRecord | None:
+    """The observation the latest reading identified as the posting body.
+
+    Falls back to the latest snapshot before any reading exists. Every
+    consumer of "the posting" (evaluation, approval pinning, the case
+    detail) goes through here, so none of them shows a followed apply page
+    or a rendered copy that merely happened to be stored last.
+    """
+
+    reading = latest_page_reading(session, case_id)
+    if reading is not None:
+        ref = next((r for r in reading.observations if r.index == reading.body_observation), None)
+        if ref is not None and ref.snapshot_id is not None:
+            chosen = get_snapshot(session, ref.snapshot_id)
+            if chosen is not None:
+                return chosen
+    return latest_snapshot(session, case_id)
+
+
+def _snapshot_record(row: SourceSnapshotRow) -> SnapshotRecord:
     return SnapshotRecord(
         snapshot_id=row.id,
         case_id=row.case_id,
@@ -268,6 +292,40 @@ def latest_snapshot(session: Session, case_id: str) -> SnapshotRecord | None:
         redirect_chain=list(row.redirect_chain),
         request_trace_id=row.request_trace_id,
     )
+
+
+# --- page readings (ADR-012) ----------------------------------------------
+
+
+def record_page_reading(session: Session, record: PageReadingRecord) -> str:
+    """Persist a reading; a repeat of the same reading id is a no-op."""
+
+    if session.get(PageReadingRow, record.reading_id) is not None:
+        return record.reading_id
+    session.add(
+        PageReadingRow(
+            id=record.reading_id,
+            case_id=record.case_id,
+            payload=record.model_dump(mode="json"),
+            prompt_version=record.prompt_version,
+            stop_reason=record.stop_reason.value,
+            created_at=utcnow(),
+        )
+    )
+    return record.reading_id
+
+
+def latest_page_reading(session: Session, case_id: str) -> PageReadingRecord | None:
+    stmt = (
+        select(PageReadingRow)
+        .where(PageReadingRow.case_id == case_id)
+        .order_by(PageReadingRow.created_at.desc())
+    )
+    row = session.scalars(stmt).first()
+    if row is None:
+        return None
+    # Self-produced JSON boundary: enums and datetimes come back as strings.
+    return PageReadingRecord.model_validate(row.payload, strict=False)
 
 
 # --- verification ----------------------------------------------------------
@@ -293,6 +351,7 @@ def record_verification(
             observed_content_hash=result.observed_content_hash,
             content_changed=result.content_changed,
             snapshot_id=result.snapshot_id,
+            reading_id=result.reading_id,
         )
     )
     return verification_id
@@ -312,6 +371,7 @@ def _verification_result(row: VerificationRow) -> VerificationResult:
         observed_content_hash=row.observed_content_hash,
         content_changed=row.content_changed,
         snapshot_id=row.snapshot_id,
+        reading_id=row.reading_id,
     )
 
 
@@ -326,6 +386,11 @@ def _latest_verification_row(session: Session, case_id: str) -> VerificationRow 
 
 def latest_verification(session: Session, case_id: str) -> VerificationResult | None:
     row = _latest_verification_row(session, case_id)
+    return None if row is None else _verification_result(row)
+
+
+def get_verification(session: Session, verification_id: str) -> VerificationResult | None:
+    row = session.get(VerificationRow, verification_id)
     return None if row is None else _verification_result(row)
 
 
@@ -374,16 +439,6 @@ def latest_evaluation(session: Session, case_id: str) -> EvaluationRecord | None
 
 def latest_evaluation_id(session: Session, case_id: str) -> str | None:
     row = _latest_evaluation_row(session, case_id)
-    return None if row is None else row.id
-
-
-def latest_snapshot_id(session: Session, case_id: str) -> str | None:
-    stmt = (
-        select(SourceSnapshotRow)
-        .where(SourceSnapshotRow.case_id == case_id)
-        .order_by(SourceSnapshotRow.retrieved_at.desc())
-    )
-    row = session.scalars(stmt).first()
     return None if row is None else row.id
 
 
@@ -477,13 +532,17 @@ def record_decision(
     reason: str,
     actor: str,
     decision_version: int,
+    attested_open: bool = False,
+    attestation_note: str | None = None,
 ) -> bool:
     """Record a human decision; an identical (request, version) replay no-ops.
 
     Returns True when the decision was applied, False when it was a
     duplicate delivery. A replay whose content differs from the recorded
     decision raises DecisionConflictError — it must never be silently
-    reported as accepted.
+    reported as accepted. An attested decision (ADR-013) also appends its
+    own audit event in the same transaction, so "a human signed for an
+    unverified posting" is a searchable fact, not a column to remember.
     """
 
     request = session.get(ApprovalRequestRow, approval_request_id)
@@ -496,6 +555,8 @@ def record_decision(
             existing.decision == decision.value
             and existing.reason == reason
             and existing.actor == actor
+            and existing.attested_open == attested_open
+            and existing.attestation_note == attestation_note
         ):
             return False
         raise DecisionConflictError(
@@ -509,11 +570,24 @@ def record_decision(
             reason=reason,
             actor=actor,
             decision_version=decision_version,
+            attested_open=attested_open,
+            attestation_note=attestation_note,
             created_at=utcnow(),
         )
     )
     request.status = ApprovalRequestStatus.DECIDED.value
     request.decided_at = utcnow()
+    if attested_open:
+        append_audit(
+            session,
+            audit_id=f"aud-attest-{decision_id}",
+            actor_type=ActorType.HUMAN,
+            actor_id=actor,
+            action="human.verification_attested",
+            resource_type="approval_request",
+            resource_id=approval_request_id,
+            reason=attestation_note,
+        )
     append_audit(
         session,
         audit_id=f"aud-{decision_id}",

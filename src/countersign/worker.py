@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.worker import Worker
 
 from countersign.activities import ALL_ACTIVITIES
+from countersign.capabilities.render import CHROMIUM_PATH_VAR, chromium_binary
 from countersign.gateway.evaluator import profile_fingerprint
 from countersign.policy.defaults import EXAMPLE_BANDS, salary_bands
 from countersign.policy.operator_profile import PROFILE_PATH_VAR, load_operator_profile
@@ -45,6 +46,11 @@ def run() -> None:
     except ValueError as exc:
         _log.error("refusing to start: %s", exc)
         raise SystemExit(2) from exc
+    browser = chromium_binary()
+    if browser is None:
+        _log.info("page reader: rendering unavailable (%s unset or not a file)", CHROMIUM_PATH_VAR)
+    else:
+        _log.info("page reader: rendering with %s", browser)
     if profile is None:
         _log.warning(
             "operator profile: not provided (%s unset); candidate-relative judgments "

@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
-from countersign.contracts.enums import JobStatus
+from countersign.contracts.enums import JobStatus, SourceAuthority
 from countersign.contracts.evaluation import EvaluationRecord, ModelEvaluation, ModelUsage
 from countersign.contracts.verification import VerificationResult
 from countersign.domain.compensation import SalaryBands, compute_compensation_signal
@@ -21,12 +21,12 @@ from countersign.env import optional_env
 from countersign.gateway.provider import (
     ContractFailure,
     EvaluationProvider,
-    GatewayError,
+    ModelProvider,
     ProviderRefusal,
     ProviderResponse,
 )
 
-PROMPT_VERSION = "evaluator/0.2.0"
+PROMPT_VERSION = "evaluator/0.2.1"
 POLICY_VERSION = "default-rubric/0.2.0"
 DEFAULT_MODEL_ROUTE = "reasoning-standard"
 
@@ -111,7 +111,7 @@ def build_user_prompt(
 ) -> str:
     """The variable suffix: one posting plus its verification summary."""
 
-    status = verification.status.value if verification else JobStatus.UNKNOWN_STALE_RISK.value
+    status = verification.status.value if verification else JobStatus.UNVERIFIED.value
     authority = verification.authority.value if verification else "UNVERIFIED"
     clipped = text[:_MAX_TEXT_CHARS]
     return (
@@ -148,23 +148,17 @@ def evaluation_id_for(
 
 
 def stamp_salary_source(
-    evaluation: ModelEvaluation, verification: VerificationResult | None
+    evaluation: ModelEvaluation, authority: SourceAuthority | None
 ) -> ModelEvaluation:
-    """Overwrite the extraction's source facts from the verification.
-
-    Where a salary came from is a source fact, not a model assessment:
-    two runs on one posting labelled it OFFICIAL_ATS and OFFICIAL_COMPANY.
-    The model keeps extracting amounts; authority and `official` come from
-    code. Without a verification the extraction is left as returned.
-    """
+    """Stamp the posting body's source, which may differ from the application page."""
 
     extraction = evaluation.salary_extraction
-    if extraction is None or verification is None:
+    if extraction is None or authority is None:
         return evaluation
     stamped = extraction.model_copy(
         update={
-            "source_authority": verification.authority,
-            "official": is_official_authority(verification.authority),
+            "source_authority": authority,
+            "official": is_official_authority(authority),
         }
     )
     return evaluation.model_copy(update={"salary_extraction": stamped})
@@ -180,6 +174,7 @@ def run_evaluation(
     text: str,
     verification: VerificationResult | None,
     bands: SalaryBands,
+    source_authority: SourceAuthority | None = None,
     profile: str | None = None,
     generation: int = 1,
     config: EvaluatorConfig | None = None,
@@ -205,7 +200,7 @@ def run_evaluation(
     started = time.monotonic()
     response: ProviderResponse | None = None
     repair_attempts = 0
-    last_error: GatewayError | None = None
+    last_error: ContractFailure | None = None
     for attempt in range(cfg.max_repair_attempts + 1):
         try:
             prompt = (
@@ -232,14 +227,15 @@ def run_evaluation(
             break
         except ProviderRefusal:
             raise
-        except GatewayError as exc:
+        except ContractFailure as exc:
             last_error = exc
             repair_attempts = attempt + 1
     if response is None:
         raise ContractFailure(f"repair budget exhausted: {last_error}")
     latency_ms = int((time.monotonic() - started) * 1000)
 
-    evaluation = stamp_salary_source(response.evaluation, verification)
+    authority = source_authority or (verification.authority if verification else None)
+    evaluation = stamp_salary_source(response.evaluation, authority)
     signal = compute_compensation_signal(evaluation.salary_extraction, bands)
     return EvaluationRecord(
         evaluation_id=evaluation_id_for(
@@ -265,9 +261,7 @@ def run_evaluation(
 
 
 @lru_cache(maxsize=4)
-def _provider_for(
-    provider_name: str, model_id: str | None, base_url: str | None
-) -> EvaluationProvider:
+def _provider_for(provider_name: str, model_id: str | None, base_url: str | None) -> ModelProvider:
     """One long-lived provider (and SDK client) per configuration."""
 
     if provider_name == "anthropic":
@@ -279,7 +273,7 @@ def _provider_for(
     return FakeEvaluationProvider()
 
 
-def resolve_provider() -> EvaluationProvider:
+def resolve_provider() -> ModelProvider:
     """Pick the provider from the environment; fake is the safe default.
 
     Memoized by the env-derived configuration, so tests that flip

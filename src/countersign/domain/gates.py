@@ -4,9 +4,12 @@ The model proposes; these gates decide. No `APPLY_NOW` without a verified
 `OPEN` status, and hard blockers are surfaced, never silently dropped.
 """
 
+from countersign.contracts.cases import Attestation
 from countersign.contracts.enums import ApprovalDecision, EvalDecision, JobStatus
 from countersign.contracts.evaluation import ModelEvaluation
 from countersign.contracts.verification import VerificationResult
+
+_NEVER_ATTESTABLE = (JobStatus.CLOSED, JobStatus.EXPIRED)
 
 
 def apply_now_permitted(verification: VerificationResult) -> bool:
@@ -17,15 +20,29 @@ def apply_now_permitted(verification: VerificationResult) -> bool:
 
 def allowed_decisions_for(
     verification: VerificationResult | None,
+    attestation: Attestation | None = None,
 ) -> list[ApprovalDecision]:
-    """The lifecycle gate: plain APPROVE requires a verified official OPEN.
+    """The lifecycle gate: APPROVE needs a verified official OPEN, or a human
+    attestation on a posting the system could not verify (ADR-013).
 
     This constrains what the approval request accepts — not merely what the
-    UI displays. Overriding a non-OPEN status is a distinct, explicitly
-    audited decision path (Slice 3); it never shares the plain-APPROVE path.
+    UI displays. The stored allowed set on a request is the no-attestation
+    list; the API recomputes with the submitted attestation at decision
+    time. An attestation is a separately audited human decision: it never
+    reopens a CLOSED or EXPIRED verification and cannot stand in for a
+    missing one. "No evidence" means a human must sign for it, not that
+    nobody may act.
     """
 
-    if verification is not None and apply_now_permitted(verification):
+    approve = verification is not None and (
+        apply_now_permitted(verification)
+        or (
+            attestation is not None
+            and attestation.observed_open
+            and verification.status not in _NEVER_ATTESTABLE
+        )
+    )
+    if approve:
         return [
             ApprovalDecision.APPROVE,
             ApprovalDecision.REJECT,

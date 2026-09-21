@@ -71,3 +71,32 @@ def test_json_boundary_models_keep_numeric_strictness() -> None:
         {"decision": "APPROVE", "reason": "ok", "decision_version": 1}
     )
     assert accepted.decision_version == 1
+
+
+def test_attestation_must_state_observed_open_and_only_accompanies_approve() -> None:
+    from countersign.contracts.cases import ApprovalDecisionRequest, Attestation
+
+    with pytest.raises(ValidationError, match="observed_open"):
+        Attestation.model_validate({"observed_open": False, "note": "form loaded"})
+    with pytest.raises(ValidationError):  # bool stays strict at the JSON boundary
+        Attestation.model_validate({"observed_open": "true", "note": "form loaded"})
+    with pytest.raises(ValidationError):
+        Attestation.model_validate({"observed_open": True, "note": "  "})
+    with pytest.raises(ValidationError, match="only accompanies APPROVE"):
+        ApprovalDecisionRequest.model_validate(
+            {
+                "decision": "REJECT",
+                "reason": "no",
+                "decision_version": 1,
+                "attestation": {"observed_open": True, "note": "form loaded"},
+            }
+        )
+    accepted = ApprovalDecisionRequest.model_validate(
+        {
+            "decision": "APPROVE",
+            "reason": "ok",
+            "decision_version": 1,
+            "attestation": {"observed_open": True, "note": "form loaded"},
+        }
+    )
+    assert accepted.attestation is not None and accepted.attestation.note == "form loaded"

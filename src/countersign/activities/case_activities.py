@@ -6,12 +6,15 @@ Policy violations and contract failures raise non-retryable errors;
 transient network errors propagate so Temporal's retry policy fires.
 """
 
+import json
 from datetime import timedelta
 
 import httpx
+from sqlalchemy.orm import Session
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from countersign.agents.page_reader import ReaderResult, read_page
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
 from countersign.capabilities.normalize import (
     EXTRACTOR_NAME,
@@ -19,11 +22,16 @@ from countersign.capabilities.normalize import (
     classify_authority,
     normalize_html,
 )
+from countersign.capabilities.page_evidence import Observation
+from countersign.capabilities.render import render_url
 from countersign.contracts.enums import (
     ActorType,
     ApprovalRequestStatus,
     CaseState,
+    EvidenceKind,
+    ObservationHow,
 )
+from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
 from countersign.contracts.workflow_io import (
@@ -38,7 +46,7 @@ from countersign.contracts.workflow_io import (
 )
 from countersign.domain.gates import allowed_decisions_for
 from countersign.domain.states import DECISION_TO_STATE
-from countersign.domain.verification import classify_job_status
+from countersign.domain.verification import classify_reading
 from countersign.gateway.evaluator import resolve_provider, run_evaluation
 from countersign.gateway.provider import ContractFailure, ProviderRefusal
 from countersign.persistence import repo
@@ -72,7 +80,9 @@ def snapshot_source(payload: CaseWorkflowInput) -> SnapshotOutcome:
 
     result = _fetch(payload.url)
     content_hash = sha256_hex(result.body)
-    snapshot_id = f"snap-{payload.case_id[:8]}-{content_hash[:16]}"
+    snapshot_id = _snapshot_id(
+        payload.case_id, result.requested_url, result.final_url, result.http_status, content_hash
+    )
     with session_scope() as session:
         repo.create_case(session, case_id=payload.case_id, url=payload.url)
         blob_key = DatabaseBlobStore(session).put(
@@ -137,8 +147,8 @@ def normalize_case(payload: CaseWorkflowInput) -> NormalizeOutcome:
             actor_id="worker",
             workflow_id=_workflow_id(),
         )
-        # Phase-1 dedup is exact (case, content-hash) — enforced by the
-        # snapshot unique constraint. Cross-case canonical merge is Slice 2.
+        # Snapshot identity includes the case, response source/status and body.
+        # Cross-case canonical merge is Slice 2.
         repo.transition_case(
             session,
             case_id=payload.case_id,
@@ -155,82 +165,145 @@ def normalize_case(payload: CaseWorkflowInput) -> NormalizeOutcome:
         )
 
 
+_OBSERVATION_SOURCE = {
+    ObservationHow.STATIC: "verification_observation",
+    ObservationHow.RENDERED: "reader_rendered",
+    ObservationHow.FOLLOWED: "reader_followed",
+}
+
+
+def _snapshot_id(case_id: str, requested: str, final: str, status: int, content_hash: str) -> str:
+    # Identical bytes from different sources/statuses are different evidence.
+    digest = sha256_hex(json.dumps([case_id, requested, final, status, content_hash]).encode())
+    return f"snap-{case_id[:8]}-{digest[:16]}"
+
+
+def _store_observation(session: Session, case_id: str, obs: Observation) -> str:
+    """Persist one reader observation as a snapshot; returns its (deduped) id."""
+
+    content_hash = sha256_hex(obs.body)
+    blob_key = DatabaseBlobStore(session).put(obs.body, obs.content_type, sha256=content_hash)
+    record = SnapshotRecord(
+        snapshot_id=_snapshot_id(
+            case_id, obs.requested_url, obs.source_url, obs.http_status, content_hash
+        ),
+        case_id=case_id,
+        canonical_url=obs.requested_url,
+        final_url=obs.source_url,
+        source_type=_OBSERVATION_SOURCE[obs.how],
+        authority_level=obs.authority,
+        retrieved_at=repo.utcnow(),
+        http_status=obs.http_status,
+        content_type=obs.content_type,
+        content_hash=content_hash,
+        raw_object_key=blob_key,
+        extractor_name=EXTRACTOR_NAME,
+        extractor_version=EXTRACTOR_VERSION,
+        redirect_chain=obs.redirect_chain,
+        request_trace_id=None,
+    )
+    return repo.record_snapshot(session, record)
+
+
 @activity.defn(name="verify_status")
 def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
-    """Second observation of the source: persisted, compared, and bound.
+    """Second observation of the source, read by the bounded page reader.
 
     Distinct from snapshot_source by intent: this re-observes whether the
-    posting is still open and where it finally redirects, immediately
-    before evaluation. The observation is stored with full provenance,
-    its normalized text is compared against the first snapshot, and the
-    verification record binds to the observation snapshot — so an approval
-    can never silently pair old content with new status.
+    posting is still open and where one applies, immediately before
+    evaluation. The reader may render the page or follow a link that is on
+    it, within code-enforced budgets; every page it sees is stored with
+    provenance, every claim it makes is checked against those stores, and
+    the status is decided by the domain decision table over the verified
+    evidence. The verification record binds to the governing observation and
+    to the reading, so an approval never pairs old content with new status.
 
-    Transient fetch errors propagate so Temporal's retry policy fires;
-    exhaustion quarantines the case in the workflow (visible, with reason).
+    Transient fetch errors on the primary observation and provider outages
+    propagate so Temporal's retry policy fires; failures on followed links
+    and schema failures are recorded in the reading's step log instead.
     """
 
-    result = _fetch(payload.url)
-    normalized = normalize_html(result.body)
-    authority = classify_authority(result.final_url)
-    status, reason = classify_job_status(
-        http_status=result.http_status,
-        apply_markers_found=normalized.apply_markers_found,
-        closed_markers_found=normalized.closed_markers_found,
-        authority=authority,
+    first = _fetch(payload.url)
+    result: ReaderResult = read_page(
+        payload.url,
+        first=first,
+        authority_of=classify_authority,
+        fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
+        render=render_url,
+        provider=resolve_provider(),
     )
-    content_hash = sha256_hex(result.body)
-    observation_id = f"snap-{payload.case_id[:8]}-{content_hash[:16]}"
+    chosen_index, status, reason = classify_reading(
+        [o.dossier() for o in result.observations],
+        result.apply_entry,
+        result.evidence,
+        now=repo.utcnow(),
+    )
+    chosen = result.observations[chosen_index]
+    closed_found = any(
+        e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
+        for e in result.evidence
+    )
+    reading_id = f"read-{payload.case_id}-g{payload.generation}"
     verification_id = f"ver-{payload.case_id}-g{payload.generation}"
 
     with session_scope() as session:
-        first = repo.latest_snapshot(session, payload.case_id)
+        first_snapshot = repo.body_snapshot(session, payload.case_id)
         first_normalized_hash: str | None = None
-        if first is not None:
-            first_body = DatabaseBlobStore(session).get(first.raw_object_key)
+        if first_snapshot is not None:
+            first_body = DatabaseBlobStore(session).get(first_snapshot.raw_object_key)
             if first_body is not None:
                 first_normalized_hash = normalize_html(first_body).content_hash
 
-        blob_key = DatabaseBlobStore(session).put(
-            result.body, result.content_type, sha256=content_hash
-        )
-        observation = SnapshotRecord(
-            snapshot_id=observation_id,
+        refs: list[ObservationRef] = []
+        for obs in result.observations:
+            refs.append(
+                ObservationRef(
+                    index=obs.index,
+                    source_url=obs.source_url,
+                    how=obs.how,
+                    http_status=obs.http_status,
+                    snapshot_id=_store_observation(session, payload.case_id, obs),
+                )
+            )
+        reading = PageReadingRecord(
+            reading_id=reading_id,
             case_id=payload.case_id,
-            canonical_url=payload.url,
-            final_url=result.final_url,
-            source_type="verification_observation",
-            authority_level=authority,
-            retrieved_at=repo.utcnow(),
-            http_status=result.http_status,
-            content_type=result.content_type,
-            content_hash=content_hash,
-            raw_object_key=blob_key,
-            extractor_name=EXTRACTOR_NAME,
-            extractor_version=EXTRACTOR_VERSION,
-            redirect_chain=result.redirect_chain,
-            request_trace_id=None,
+            url=payload.url,
+            observations=refs,
+            body_observation=result.body_observation,
+            apply_entry=result.apply_entry,
+            evidence=result.evidence,
+            rejected_claims=result.rejected_claims,
+            steps=result.steps,
+            stop_reason=result.stop_reason,
+            prompt_version=result.prompt_version,
+            usage=result.usage,
+            read_at=repo.utcnow(),
         )
-        stored_snapshot_id = repo.record_snapshot(session, observation)
+        repo.record_page_reading(session, reading)
 
         content_changed = (
             None
             if first_normalized_hash is None
-            else normalized.content_hash != first_normalized_hash
+            else result.observations[result.body_observation].normalized_hash
+            != first_normalized_hash
         )
         verification = VerificationResult(
             case_id=payload.case_id,
             status=status,
-            authority=authority,
+            authority=chosen.authority,
             checked_at=repo.utcnow(),
-            http_status=result.http_status,
-            final_url=result.final_url,
+            http_status=chosen.http_status,
+            final_url=chosen.source_url,
             reason=reason,
-            apply_markers_found=normalized.apply_markers_found,
-            closed_markers_found=normalized.closed_markers_found,
-            observed_content_hash=normalized.content_hash,
+            apply_markers_found=(
+                result.apply_entry is not None and result.apply_entry.observation == chosen_index
+            ),
+            closed_markers_found=closed_found,
+            observed_content_hash=chosen.normalized_hash,
             content_changed=content_changed,
-            snapshot_id=stored_snapshot_id,
+            snapshot_id=refs[chosen_index].snapshot_id,
+            reading_id=reading_id,
         )
         repo.record_verification(session, verification_id=verification_id, result=verification)
         repo.transition_case(
@@ -241,7 +314,17 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             actor_id="worker",
             workflow_id=_workflow_id(),
         )
-    return VerifyOutcome(verification=verification, observed_text_chars=len(normalized.text))
+    body_text = result.observations[result.body_observation].text
+    activity.logger.info(
+        "verify: %s status=%s entry=%s observations=%d stop=%s rejected=%d",
+        payload.case_id,
+        status.value,
+        result.apply_entry.kind.value if result.apply_entry else None,
+        len(result.observations),
+        result.stop_reason.value,
+        len(result.rejected_claims),
+    )
+    return VerifyOutcome(verification=verification, observed_text_chars=len(body_text))
 
 
 @activity.defn(name="evaluate_case")
@@ -249,7 +332,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
     """Run the governed model evaluation and persist the versioned record."""
 
     with session_scope() as session:
-        snapshot = repo.latest_snapshot(session, payload.case_id)
+        snapshot = repo.body_snapshot(session, payload.case_id)
         if snapshot is None:
             raise ApplicationError("no snapshot for case", type="MissingSnapshot")
         body = DatabaseBlobStore(session).get(snapshot.raw_object_key)
@@ -268,10 +351,11 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             resolve_provider(),
             case_id=payload.case_id,
             content_hash=normalized.content_hash,
-            url=payload.url,
-            title=title,
+            url=snapshot.final_url,
+            title=normalized.title or title,
             text=normalized.text,
             verification=verification,
+            source_authority=snapshot.authority_level,
             bands=salary_bands(),
             profile=load_operator_profile(),
             generation=payload.generation,
@@ -316,13 +400,14 @@ def create_approval(payload: CaseWorkflowInput) -> ApprovalRequestOutcome:
     expires_at = repo.utcnow() + timedelta(days=APPROVAL_TTL_DAYS)
     with session_scope() as session:
         verification = repo.latest_verification(session, payload.case_id)
+        snapshot = repo.body_snapshot(session, payload.case_id)
         row = repo.create_approval_request(
             session,
             case_id=payload.case_id,
             generation=payload.generation,
             allowed=allowed_decisions_for(verification),
             expires_at=expires_at,
-            snapshot_id=repo.latest_snapshot_id(session, payload.case_id),
+            snapshot_id=snapshot.snapshot_id if snapshot else None,
             verification_id=repo.latest_verification_id(session, payload.case_id),
             evaluation_id=repo.latest_evaluation_id(session, payload.case_id),
             workflow_id=_workflow_id(),
@@ -359,6 +444,8 @@ def finalize_decision(signal: DecisionSignal) -> None:
                 reason=signal.reason,
                 actor=signal.actor,
                 decision_version=signal.decision_version,
+                attested_open=signal.attested_open,
+                attestation_note=signal.attestation_note,
             )
         except repo.DecisionConflictError as exc:
             raise ApplicationError(str(exc), type="DecisionConflict", non_retryable=True) from exc

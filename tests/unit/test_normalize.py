@@ -29,15 +29,6 @@ def test_extracts_title_site_and_text() -> None:
     assert "color: red" not in result.text
 
 
-def test_marker_detection() -> None:
-    result = normalize_html(HTML)
-    assert result.apply_markers_found
-    assert not result.closed_markers_found
-
-    closed = normalize_html(b"<p>This job is no longer accepting applications.</p>")
-    assert closed.closed_markers_found
-
-
 def test_normalization_is_deterministic() -> None:
     assert normalize_html(HTML).content_hash == normalize_html(HTML).content_hash
 
@@ -90,14 +81,6 @@ def test_og_title_wins_over_placeholder_title_tag() -> None:
     assert normalize_html(HTML).title == "Senior Engineer - ExampleCorp"
 
 
-def test_smartrecruiters_apply_label_counts_with_either_apostrophe() -> None:
-    """The site's apply button reads "I'm interested"; pages use both apostrophes."""
-
-    for label in ("I'm interested", "I\u2019m interested"):
-        page = f"<html><body><h1>Engineer</h1><p>Build.</p><button>{label}</button></body></html>"
-        assert normalize_html(page.encode()).apply_markers_found, label
-
-
 _LDJSON_PAGE = b"""
 <html><head>
   <title>Member of Technical Staff</title>
@@ -130,7 +113,6 @@ def test_json_ld_job_posting_is_the_fallback_for_client_rendered_pages() -> None
     assert "window.__APP__" not in result.text
     assert result.title == "Member of Technical Staff"
     assert result.company_hint == "Example Labs"
-    assert result.apply_markers_found
     assert normalize_html(_LDJSON_PAGE).content_hash == result.content_hash
 
 

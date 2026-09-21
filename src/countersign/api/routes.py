@@ -26,7 +26,7 @@ from countersign.contracts.cases import (
 )
 from countersign.contracts.enums import ApprovalDecision, ApprovalRequestStatus, CaseState
 from countersign.contracts.workflow_io import CaseWorkflowInput, DecisionSignal
-from countersign.domain.gates import gated_decision
+from countersign.domain.gates import allowed_decisions_for, gated_decision
 from countersign.persistence import repo
 from countersign.persistence.db import session_scope
 from countersign.runtime import TASK_QUEUE, WORKFLOW_NAME, connect_client, workflow_id_for
@@ -137,7 +137,7 @@ def get_case(case_id: str) -> CaseDetail:
             url=row.url,
             created_at=row.created_at,
             updated_at=row.updated_at,
-            snapshot=repo.latest_snapshot(session, case_id),
+            snapshot=repo.body_snapshot(session, case_id),
             verification=verification,
             evaluation=evaluation,
             gated_decision=gated,
@@ -157,12 +157,16 @@ async def submit_decision(
         if request is None:
             raise HTTPException(status_code=404, detail="unknown approval request")
 
+        attested_open = payload.attestation is not None
+        attestation_note = payload.attestation.note if payload.attestation else None
         existing = repo.get_decision(session, approval_request_id, payload.decision_version)
         if existing is not None:
             if (
                 existing.decision == payload.decision.value
                 and existing.reason == payload.reason
                 and existing.actor == payload.actor
+                and existing.attested_open == attested_open
+                and existing.attestation_note == attestation_note
             ):
                 # Idempotent replay of an already-recorded decision.
                 return ApprovalDecisionResponse(
@@ -180,8 +184,25 @@ async def submit_decision(
             raise HTTPException(status_code=410, detail="approval request has expired")
         if status is ApprovalRequestStatus.DECIDED:
             raise HTTPException(status_code=409, detail="approval already decided")
-        if payload.decision.value not in request.allowed_decisions:
-            raise HTTPException(status_code=400, detail="decision not allowed")
+        if payload.decision.value in request.allowed_decisions:
+            if payload.attestation is not None:
+                # Recording it would let the audit log claim a human signed
+                # for an unverified posting that the system had verified.
+                raise HTTPException(
+                    status_code=400,
+                    detail="attestation not applicable: the decision is allowed without one",
+                )
+        else:
+            # The stored set is the no-attestation gate. A reviewer's own
+            # attestation is re-checked here against the verification the
+            # request pinned, never against whatever is latest (ADR-013).
+            pinned = (
+                repo.get_verification(session, request.verification_id)
+                if request.verification_id is not None
+                else None
+            )
+            if payload.decision not in allowed_decisions_for(pinned, payload.attestation):
+                raise HTTPException(status_code=400, detail="decision not allowed")
         case_id = request.case_id
 
     client = await _temporal()
@@ -195,6 +216,8 @@ async def submit_decision(
                 reason=payload.reason,
                 decision_version=payload.decision_version,
                 actor=payload.actor,
+                attested_open=attested_open,
+                attestation_note=attestation_note,
             ),
         )
     except TemporalError as exc:
