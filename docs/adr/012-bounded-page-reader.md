@@ -35,7 +35,12 @@ It sees no operator profile and does not judge fit, salary or the company.
   Synchronous DNS/library calls are not forcibly cancelled; the Activity's
   three-minute timeout remains the outer limit, with time left for saving
   normal timeout results. There is no additional scheduler or retry loop.
-- **Evidence:** a cited control must match its observed label **and target**;
+- **Evidence:** the reading's apply entry is a required object with an
+  explicit `NONE` kind, not an optional one: under constrained decoding the
+  null branch was the path of least resistance, and live models on both
+  routes described a working Apply control in their notes while leaving the
+  field null; the same page was cited correctly once the choice had to be
+  made. A cited control must match its observed label **and target**;
   JSON-LD claims must match the actual field. Other spans are checked with
   whitespace/case folding. Rejected claims remain in the reading. These
   checks establish provenance; the meaning of a control or notice remains
@@ -92,6 +97,10 @@ posting body; approval pins that body and the verification separately.
 - Up to six provider attempts per reading (three steps plus one repair
   each). Usage counts returned responses; failed requests may expose no
   token counts and are not assumed free.
+- The model's stated reason for each step and its notes on the final
+  reading are persisted with the reading, so an empty reading can be
+  audited without re-running it; `countersign.diagnostics.replay_reading`
+  replays a stored observation through the reader when that is needed.
 - Company-domain verification, board authority classification and permission
   to approve from a board remain separate policy work. This change does
   not grant new official-source tiers.

@@ -104,6 +104,13 @@ them.
   code-initiated render is the recorded step-0 pre-render of a shell page
   (no visible HTML text and no controls). Do not add a move, widen the allowlist,
   or let a model claim bypass the check without a new ADR.
+- **No optional nested objects at decision points in model-output
+  contracts.** `ApplyEntry | None` let live models narrate an Apply control
+  in `notes` and leave the field null on the same page, across routes and
+  models; a required object with an explicit `NONE` kind fixed it. Model
+  reasons (`why`, `notes`) are persisted; diagnose an empty reading with
+  `python -m countersign.diagnostics.replay_reading <case or snapshot id>`
+  before touching the prompt.
 - **The approval gate is server-owned** (ADR-013). `APPROVE` on an
   unverified posting needs a typed human attestation, re-checked by the
   API against the verification pinned to the request. Do not widen the

@@ -6,10 +6,10 @@ in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-21 |
-| Branch | `main`, no remote. Code for the page reader, browser packaging, `UNVERIFIED` and human attestation is committed in `73191d7`; design and working-agreement updates are recorded separately in ADR-012 / ADR-013 and this documentation commit. |
+| As of | 2026-09-25 |
+| Branch | `main`, no remote. Reader, browser packaging and attestation: `73191d7`; required apply entry (`page-reader/0.3.0`), persisted reasons/notes and replay diagnostic: `da3c056`. Documentation is committed separately. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
-| Current focus | Deployment and a small live regression set for the newly committed reader and attestation path. |
+| Current focus | Complete the live regression set after the rebuilt deployment: two company-page cases reached pending approval on 2026-09-25; navigation and attested approval remain to verify. |
 
 ## Current implementation
 
@@ -19,7 +19,15 @@ in the gitignored `HANDOFF.md`.
   target-less buttons), in document order; `controls_truncated` marks a
   cut. Bounds are **120 seconds** after the initial fetch, three model
   steps, two follows and one schema repair per step. Reader prompt:
-  `page-reader/0.2.0`; the Activity's outer timeout remains three minutes.
+  `page-reader/0.3.0`; the Activity's outer timeout remains three minutes.
+  The reading's apply entry is a **required object with an explicit
+  `NONE` kind**: with an optional object, live models on both routes
+  described a working Apply control in their notes and left the field
+  null, stably across three models; the same stored page was cited
+  exactly once the choice had to be made. The model's reason for each
+  step and its final notes are persisted with the reading;
+  `python -m countersign.diagnostics.replay_reading <case or snapshot id>`
+  replays a stored observation without refetching.
 - **Pre-render:** when the first page has **no visible HTML text and no
   controls**, code renders once before the model and records step 0.
   This also applies when JSON-LD already supplies the posting body. The
@@ -51,18 +59,20 @@ in the gitignored `HANDOFF.md`.
 - **Schema:** unreleased migration `0001` includes `page_readings`,
   verification `reading_id`, attestation fields and the revised snapshot
   identity. The enum rename also affects stored payloads and Temporal
-  histories. Deployment requires a fresh schema/history, not an in-place
-  upgrade of the current stack. No existing deployment data was changed.
+  histories. Upgrading a stack from before ADR-013 requires fresh
+  schema/history. The subsequent required-entry and diagnostics change
+  adds no migration; the rebuilt worker runs `page-reader/0.3.0`.
 
 ## Verification and deployment
 
-Code commit `73191d7` was checked in a fresh detached worktree and Python
-venv, with front-end dependencies installed from `pnpm-lock.yaml`:
+Code commit `da3c056` was checked on 2026-09-25 in a fresh detached
+worktree and Python 3.14.3 venv, with front-end dependencies installed
+from `pnpm-lock.yaml`:
 
 - `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
-  97 Python files; `.venv/bin/pyright`: 0 errors;
+  102 Python files; `.venv/bin/pyright`: 0 errors;
   `.venv/bin/lint-imports`: 3 contracts kept.
-- `.venv/bin/pytest`: **154 passed, no skips**. PostgreSQL integration used
+- `.venv/bin/pytest`: **157 passed, no skips**. PostgreSQL integration used
   disposable database `countersign_code_check` at `127.0.0.1:61661` in a
   separate temporary container. Other database fixtures used SQLite;
   Temporal used its test server; rendering used real local Chromium.
@@ -72,22 +82,38 @@ venv, with front-end dependencies installed from `pnpm-lock.yaml`:
   credential-like values and private paths; no matches. Private files
   remain ignored and untracked. A full gitleaks scan remains a publication
   prerequisite.
-- `docker build -t countersign-commit-check:20260921 .`: **blocked** by a
-  timeout fetching `docker.io/library/python:3.12-slim` metadata, before
-  installation began. Browser packaging is implemented but the resulting
-  container image has not been verified in this run.
 
-The running Compose stack predates these changes. No live model calls
-were made during this commit round. Earlier owner-driven runs cover the
-profile, salary policy, extraction fallback and empty-body handling;
-worker-kill recovery and provider-error retry also have live evidence.
+The required-entry fix was first checked on 2026-09-22 by replaying a
+stored company-page observation. That diagnostic reproduced the prior
+null-entry failure and accepted the exact control/target under the new
+schema; it was not an end-to-end deployment run.
+
+**Live deployment evidence, 2026-09-25:** after the owner rebuilt the
+application containers, two real company-careers cases ran through fetch,
+`page-reader/0.3.0`, `evaluator/0.2.1` and approval creation. Read-only
+PostgreSQL inspection confirmed both reached `PENDING_APPROVAL`, each with
+two snapshots, one reading, one evaluation and one approval. Each reading
+used one static HTTP 200 observation and ended DONE on step 1, with an
+accepted `APPLY_CONTROL`, zero rejected claims, and persisted `why` and
+`notes`. Verification was `OPEN_THIRD_PARTY_ONLY` / `COMPANY_CONTROLLED`;
+plain APPROVE remained gated, and approval verification/evaluation pins
+matched. These are fresh live workflow runs, not diagnostic replays.
+Neither run exercised FOLLOW, RENDER or human attestation; both approvals
+were still pending when inspected.
+
+The rebuilt worker reports `page-reader/0.3.0`; a browser-launch smoke
+check inside it successfully started packaged Chromium (153.0.8010.12).
+The earlier base-image fetch timeout is no longer the deployment blocker.
+No new live model calls or deployment changes were made during this
+verification/commit round. Earlier runs retain recovery and provider-error
+retry evidence; private case details stay outside tracked documentation.
 
 ## Next
 
-1. Once base-image fetching works, build the image and confirm Chromium
-   launches inside it. Recreate the Compose stack as a whole with fresh
-   unreleased database/history state, then check direct ATS, board → ATS,
-   a client-rendered shell, and one attested approval against real cases.
+1. Complete the rebuilt deployment's live regression set: direct ATS,
+   board → ATS, a client-rendered shell (step-0 RENDER), and one attested
+   approval. The two company-page runs and container browser launch are
+   verified; they do not cover these remaining paths.
 2. Before publication, run gitleaks and inspect tracked content. The owner
    adds the remote and pushes.
 3. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
