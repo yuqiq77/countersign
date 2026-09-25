@@ -111,6 +111,12 @@ them.
   reasons (`why`, `notes`) are persisted; diagnose an empty reading with
   `python -m countersign.diagnostics.replay_reading <case or snapshot id>`
   before touching the prompt.
+- **Rounds share one workflow id** (`job-case/{case_id}`, ADR-014) through
+  Continue-As-New; reading, verification and approval ids include the
+  generation via `domain/ids.py`. Each run accepts only its
+  own round's approval Signal from its first event. "In flight" is
+  computed by the server from stored records (`repo.in_flight`); do not
+  reintroduce a client-side state list.
 - **The approval gate is server-owned** (ADR-013). `APPROVE` on an
   unverified posting needs a typed human attestation, re-checked by the
   API against the verification pinned to the request. Do not widen the

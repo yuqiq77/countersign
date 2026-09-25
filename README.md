@@ -122,6 +122,10 @@ Implemented (Slice 1 — one durable case):
   OPEN; on an unverified posting the reviewer may approve only with a typed
   attestation of what they saw, re-checked by the API and audited as its
   own human event (ADR-013);
+- an evidence loop: "add context and re-evaluate" records the reviewer's
+  note as their decision and continues the same workflow into the next
+  round, which re-verifies the posting and re-evaluates with the note as
+  labelled operator context, up to three rounds (ADR-014);
 - thin model gateway: structured output against the Pydantic contract,
   bounded schema-repair retry, token/latency/version capture; deterministic
   fake provider for tests and model-free runs;
