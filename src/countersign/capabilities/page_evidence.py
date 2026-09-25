@@ -9,7 +9,12 @@ from countersign.capabilities.normalize import normalize_html
 from countersign.contracts.enums import ObservationHow, SourceAuthority
 from countersign.contracts.page_reading import JsonLdSummary, PageControl, PageDossier
 
-_EXCERPT_CHARS = 6_000
+# Postings can put "how to apply" at the end, beyond a head-only excerpt.
+# Above the cap the dossier keeps the head and the tail verbatim, marks
+# the gap, and says so; citations are checked against the full text.
+MAX_EXCERPT_CHARS = 16_000
+_EXCERPT_HEAD = 12_000
+_EXCERPT_TAIL = 4_000
 # Link-heavy pages (guest views of large boards) carry 150+ controls; past
 # this cap the dossier says it was cut instead of silently dropping the rest.
 MAX_CONTROLS = 120
@@ -96,7 +101,18 @@ class Observation:
     content_type: str = "text/html"
     redirect_chain: list[str] = field(default_factory=lambda: [])
 
+    def excerpt(self) -> tuple[str, bool]:
+        if len(self.text) <= MAX_EXCERPT_CHARS:
+            return self.text, False
+        omitted = len(self.text) - _EXCERPT_HEAD - _EXCERPT_TAIL
+        return (
+            f"{self.text[:_EXCERPT_HEAD]}\n[… {omitted} characters omitted …]\n"
+            f"{self.text[-_EXCERPT_TAIL:]}",
+            True,
+        )
+
     def dossier(self) -> PageDossier:
+        text_excerpt, text_truncated = self.excerpt()
         return PageDossier(
             observation=self.index,
             source_url=self.source_url,
@@ -106,7 +122,8 @@ class Observation:
             http_status=self.http_status,
             text_chars=len(self.text),
             text_source=self.text_source,
-            text_excerpt=self.text[:_EXCERPT_CHARS],
+            text_excerpt=text_excerpt,
+            text_truncated=text_truncated,
             controls=self.controls,
             controls_truncated=self.controls_truncated,
             jsonld=self.jsonld,
@@ -138,16 +155,16 @@ def observe(
     parser.feed(body.decode("utf-8", errors="replace"))
     # Keep unlabeled links and controls after navigation menus as well. The
     # fetched body is size-limited; keyword filters would hide facts from the
-    # model. One entry per target (the first non-empty label wins) or per
-    # label for a target-less button, in document order, then a fixed cap.
-    by_key: dict[tuple[str | None, str], PageControl] = {}
-    for text, href in parser.controls:
-        target = urljoin(source_url, href) if href else None
-        key = (target, "" if target else text)
-        current = by_key.get(key)
-        if current is None or (not current.text and text):
-            by_key[key] = PageControl(text=text, href=target)
-    controls = list(by_key.values())
+    # model. Only exact (label, target) duplicates merge: two labels on one
+    # target carry different meaning (a bare address link and an "Apply now"
+    # button on the same mailto), and that reading belongs to the model.
+    # Document order, then a fixed cap.
+    controls = [
+        PageControl(text=text, href=href)
+        for text, href in dict.fromkeys(
+            (text, urljoin(source_url, href) if href else None) for text, href in parser.controls
+        )
+    ]
     truncated = len(controls) > MAX_CONTROLS
     return Observation(
         index=index,

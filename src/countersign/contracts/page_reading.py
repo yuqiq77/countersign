@@ -55,6 +55,9 @@ class PageDossier(ContractModel):
     # structured data), or "none".
     text_source: str
     text_excerpt: str
+    # True when the excerpt is the head and tail of a longer text with a
+    # marked gap between them; both parts are verbatim and citable.
+    text_truncated: bool = False
     controls: list[PageControl] = Field(default_factory=lambda: [])
     # True when the page had more controls than the fixed cap; the list is
     # the first ones in document order, so a missing entry is not evidence

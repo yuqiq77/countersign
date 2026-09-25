@@ -604,3 +604,172 @@ def test_jsonld_claim_must_name_the_actual_field_not_an_unrelated_date() -> None
     assert result.apply_entry is None
     assert len(result.rejected_claims) == 2
     assert [e.cited_text for e in result.evidence] == ["2020-01-01"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        ApplyEntry(
+            kind=ApplyEntryKind.MAILTO,
+            observation=0,
+            cited_text="Apply now",
+            href="mailto:careers@acme.example",
+        ),
+        ApplyEntry(
+            kind=ApplyEntryKind.TEXT_MARKER,
+            observation=0,
+            cited_text=(
+                "receiving your electronic application (CV, reference letters, etc.) by email to"
+            ),
+        ),
+    ],
+)
+def test_company_fixture_apply_routes_verify(entry: ApplyEntry) -> None:
+    from pathlib import Path
+
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+    body = (fixtures / "company_page_mailto_apply.html").read_bytes()
+    result = _run(
+        FakeEvaluationProvider(
+            page_steps=[
+                PageStep(
+                    action=ReaderAction.DONE,
+                    why="the posting says how to apply",
+                    reading=PageReading(body_observation=0, apply_entry=entry),
+                )
+            ]
+        ),
+        first_url="https://www.acme.example/careers/platform-engineer/",
+        first_html=body,
+    )
+    assert result.apply_entry == entry
+    assert result.rejected_claims == []
+
+
+def test_citation_from_the_shown_tail_verifies() -> None:
+    """A span quoted from the shown tail verifies against the full text."""
+
+    filler = " ".join(f"line {i} of the posting body." for i in range(1400))
+    tail = "Send your application by email to careers@acme.example."
+    html = f"<p>{filler}</p><p>{tail}</p>".encode()
+    entry = ApplyEntry(kind=ApplyEntryKind.TEXT_MARKER, observation=0, cited_text=tail)
+    result = _run(
+        FakeEvaluationProvider(
+            page_steps=[
+                PageStep(
+                    action=ReaderAction.DONE,
+                    why="instruction in the tail",
+                    reading=PageReading(body_observation=0, apply_entry=entry),
+                )
+            ]
+        ),
+        first_url=ATS_URL,
+        first_html=html,
+    )
+    assert result.observations[0].dossier().text_truncated is True
+    assert result.apply_entry == entry and result.rejected_claims == []
+
+
+def _jsonld_page(fields: str) -> bytes:
+    return (
+        b"<p>Build things. Apply below.</p>"
+        b'<script type="application/ld+json">{"@type": "JobPosting", '
+        + fields.encode()
+        + b"}</script>"
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "cited", "href", "accepted"),
+    [
+        ('"directApply": true', "directApply: true", None, True),
+        ('"directApply": true', '"directApply": true', None, True),
+        ('"directApply": true', "directApply = True", None, True),
+        ('"directApply": true', "  directApply :  true ,", None, True),
+        ('"directApply": true', "notdirectApply: true", None, False),
+        ('"directApply": true', "directApply: trueish", None, False),
+        (
+            '"directApply": true',
+            '"directApply": false, "otherFlag": true',
+            None,
+            False,
+        ),
+        ('"directApply": false', '"directApply": true', None, False),  # fact is false
+        (
+            '"directApply": false, "otherFlag": true',
+            '"directApply": false, "otherFlag": true',
+            None,
+            False,
+        ),
+        ('"directApply": true, "otherFlag": true', '"otherFlag": true', None, False),  # wrong key
+        ('"directApply": true', '"directApply": "true"', "https://x.example", False),  # href
+        ('"title": "Engineer"', "directApply: true", None, False),  # field missing
+    ],
+)
+def test_direct_apply_citation_is_checked_against_the_fact(
+    fields: str, cited: str, href: str | None, accepted: bool
+) -> None:
+    entry = ApplyEntry(
+        kind=ApplyEntryKind.JSON_LD_DIRECT_APPLY, observation=0, cited_text=cited, href=href
+    )
+    result = _run(
+        FakeEvaluationProvider(
+            page_steps=[
+                PageStep(
+                    action=ReaderAction.DONE,
+                    why="structured",
+                    reading=PageReading(body_observation=0, apply_entry=entry),
+                )
+            ]
+        ),
+        first_url=ATS_URL,
+        first_html=_jsonld_page(fields),
+    )
+    assert (result.apply_entry == entry) is accepted
+    assert (result.rejected_claims == []) is accepted
+
+
+@pytest.mark.parametrize(
+    ("fields", "cited", "href", "accepted"),
+    [
+        ('"validThrough": "2030-01-31"', "2030-01-31", None, True),
+        ('"validThrough": "2030-01-31"', '"validThrough": "2030-01-31"', None, True),
+        (
+            '"validThrough": "2030-01-31T23:59:00Z"',
+            "validThrough: 2030-01-31T23:59:00Z",
+            None,
+            True,
+        ),
+        ('"validThrough": "2030-01-31"', "2030-01-30", None, False),  # wrong date
+        ('"validThrough": "2030-01-31"', "2030-01", None, False),  # not the whole value
+        ('"validThrough": "2030-01-31"', "2030-01-31", "https://x.example", False),  # href
+        ('"title": "Engineer"', "2030-01-31", None, False),  # field missing
+        ('"validThrough": ""', "validThrough: ", None, False),  # empty value
+    ],
+)
+def test_valid_through_citation_must_contain_the_actual_value(
+    fields: str, cited: str, href: str | None, accepted: bool
+) -> None:
+    claim = PageEvidence(
+        kind=EvidenceKind.VALID_THROUGH, observation=0, cited_text=cited, href=href
+    )
+    result = _run(
+        FakeEvaluationProvider(
+            page_steps=[
+                PageStep(
+                    action=ReaderAction.DONE,
+                    why="expiry",
+                    reading=PageReading(body_observation=0, apply_entry=_NONE, evidence=[claim]),
+                )
+            ]
+        ),
+        first_url=ATS_URL,
+        first_html=_jsonld_page(fields),
+    )
+    if accepted:
+        assert result.rejected_claims == []
+        # The model's accepted claim stands in for the code-added one: one per observation.
+        assert [e for e in result.evidence if e.kind == EvidenceKind.VALID_THROUGH] == [claim]
+    else:
+        assert len(result.rejected_claims) == 1
+        assert claim not in result.evidence

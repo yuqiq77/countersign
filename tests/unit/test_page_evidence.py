@@ -1,7 +1,16 @@
 """Extraction gives the model facts without judging controls by keywords."""
 
-from countersign.capabilities.page_evidence import MAX_CONTROLS, Observation, observe
+from pathlib import Path
+
+from countersign.capabilities.page_evidence import (
+    MAX_CONTROLS,
+    MAX_EXCERPT_CHARS,
+    Observation,
+    observe,
+)
 from countersign.contracts.enums import ObservationHow, SourceAuthority
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def _observe(html: bytes) -> Observation:
@@ -61,7 +70,11 @@ def test_accessible_labels_and_submit_values_survive_navigation_links() -> None:
     assert any(c.href == "https://acme.example/unlabelled" for c in controls)
 
 
-def test_controls_are_one_per_target_keeping_the_first_real_label() -> None:
+def test_only_exact_label_target_duplicates_merge() -> None:
+    """Two labels on one target carry different meaning (a bare address link
+    and an "Apply now" button on the same mailto); merging by target once
+    hid the button from the model on a live page."""
+
     obs = _observe(b"""
       <a href="/apply"><img src="logo.png"></a>
       <a href="/apply">Apply</a>
@@ -70,11 +83,45 @@ def test_controls_are_one_per_target_keeping_the_first_real_label() -> None:
       <a href="/privacy">Privacy</a><a href="/privacy">Privacy</a>
     """)
     assert [(c.text, c.href) for c in obs.controls] == [
+        ("", "https://acme.example/apply"),
         ("Apply", "https://acme.example/apply"),
+        ("Apply now", "https://acme.example/apply"),
         ("Save job", None),
         ("Privacy", "https://acme.example/privacy"),
     ]
     assert obs.controls_truncated is False
+
+
+def test_excerpt_keeps_head_and_tail_verbatim_and_marks_the_gap() -> None:
+    filler = " ".join(f"line {i} of the posting body." for i in range(1400))
+    tail = "We look forward to receiving your application by email to careers@acme.example."
+    obs = _observe(f"<p>{filler}</p><p>{tail}</p>".encode())
+    assert len(obs.text) > MAX_EXCERPT_CHARS
+    dossier = obs.dossier()
+    assert dossier.text_truncated is True
+    assert dossier.text_excerpt.startswith(obs.text[:12_000])
+    assert dossier.text_excerpt.endswith(obs.text[-4_000:])
+    omitted = len(obs.text) - 12_000 - 4_000
+    assert f"[… {omitted} characters omitted …]" in dossier.text_excerpt
+    assert tail in dossier.text_excerpt
+    short = _observe(b"<p>short posting</p>").dossier()
+    assert (short.text_excerpt, short.text_truncated) == ("short posting", False)
+
+
+def test_company_fixture_dossier_retains_the_instruction_and_both_mailto_labels() -> None:
+    """Regression for a live company page: the application instruction near
+    the end and the "Apply now" button on an already-linked mailto."""
+
+    obs = _observe((FIXTURES / "company_page_mailto_apply.html").read_bytes())
+    dossier = obs.dossier()
+    assert dossier.text_truncated is False
+    assert "receiving your electronic application" in dossier.text_excerpt
+    assert obs.text.find("receiving your electronic application") > 6_000  # the old cap
+    mailto = [(c.text, c.href) for c in dossier.controls if (c.href or "").startswith("mailto:")]
+    assert mailto == [
+        ("careers@acme.example", "mailto:careers@acme.example"),
+        ("Apply now", "mailto:careers@acme.example"),
+    ]
 
 
 def test_control_list_is_capped_in_document_order_and_says_so() -> None:
