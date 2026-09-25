@@ -151,6 +151,42 @@ audited, human-authored text bound to the case.
   evaluation; three rounds of context is a conversation, more is a
   profile that should be edited.
 
+## Amendment (2026-09-25, after the first live round)
+
+Two live rounds showed the summary restating the rules as disclaimers
+("relies materially on case-specific operator context that I have
+treated as assertion, not verified fact…"), across two models, because
+the prompt asked to "attribute reliance in the summary" and the `summary`
+field had no stated purpose. The evaluator also could not say what a
+round changed: it saw the profile, the posting and the notes, never the
+previous judgment.
+
+- The `summary` field now carries its purpose in the contract (for the
+  reviewer; decision and main reasons in three to six plain sentences;
+  what context or a previous assessment resolved and what remains open;
+  no process description or restated rules). The attribution clause
+  becomes: "When operator context materially informs the assessment,
+  acknowledge it once in plain language. Avoid repeating explanations of
+  verification status, salary handling, or evidence provenance unless
+  they materially affect the recommendation." `evaluator/0.3.1`.
+- **The previous round's structured evaluation is an input** to the next
+  round, read from `evaluation_runs` (no new table, no transcript) and
+  placed after the posting text as a labelled *revisable judgment, not
+  evidence*. The rule: the current posting, profile and operator context
+  remain the basis; overturning it is allowed and its scores need not be
+  kept; candidate facts it inferred are not established facts, since only
+  the profile and operator context establish those. The new record
+  cites it (`previous_evaluation_id`) and carries its `generation`. The
+  known cost is anchoring on an earlier mistake; the boundary above is
+  the mitigation, and the case page keeps every round visible.
+- A structured "what changed" field was considered and deferred: with the
+  previous assessment in view, the summary should say it; if it does not,
+  the field is the next step.
+- Score movement of ±1 between rounds was measured against four replays
+  of an identical input and found to be sampling noise; the decision band
+  and seniority label were stable. Treated as a known limitation until
+  calibration cards exist.
+
 ## Revisit when
 
 - Notes are wanted before the first evaluation or without a decision:

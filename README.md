@@ -125,7 +125,9 @@ Implemented (Slice 1 — one durable case):
 - an evidence loop: "add context and re-evaluate" records the reviewer's
   note as their decision and continues the same workflow into the next
   round, which re-verifies the posting and re-evaluates with the note as
-  labelled operator context, up to three rounds (ADR-014);
+  labelled operator context, up to three rounds. Each later round also
+  receives the preceding approval's pinned assessment as a revisable
+  judgment; earlier evaluations remain available in case detail (ADR-014);
 - thin model gateway: structured output against the Pydantic contract,
   bounded schema-repair retry, token/latency/version capture; deterministic
   fake provider for tests and model-free runs;
