@@ -41,9 +41,12 @@ It sees no operator profile and does not judge fit, salary or the company.
   routes described a working Apply control in their notes while leaving the
   field null; the same page was cited correctly once the choice had to be
   made. A cited control must match its observed label **and target**;
-  JSON-LD claims must match the actual field. Other spans are checked with
-  whitespace/case folding. Rejected claims remain in the reading. These
-  checks establish provenance; the meaning of a control or notice remains
+  JSON-LD claims are checked against the actual field (`directApply` must
+  be true and the citation must name that pair; `validThrough` must be
+  present and appear whole in the citation), tolerant of the quoting the
+  model copied but not of a different key or value. Other spans are
+  checked with whitespace/case folding. Rejected claims remain in the
+  reading. These checks establish provenance; the meaning of a control or notice remains
   the model's assessment. Code does not restore entries the model rejected
   through keyword, mailto or candidate-ranking fallbacks.
 - **Status:** a new fetch/render supersedes the previous response for its
@@ -90,10 +93,18 @@ posting body; approval pins that body and the verification separately.
 - One generic reading path replaces phrase lists and duplicate candidate
   ranking. The unscripted fake reader returns an empty assessment; tests
   needing an open posting explicitly script its reading.
-- A dossier lists at most 120 controls per observation, one per target,
-  in document order, and says when it was cut (`controls_truncated`).
-  This is a size cap, not a keyword filter; link-heavy board pages carried
-  150+ controls and several thousand tokens per observation without it.
+- A dossier lists at most 120 controls per observation in document order,
+  merging only exact label/target duplicates, and says when it was cut
+  (`controls_truncated`). This is a size cap, not a keyword filter;
+  link-heavy board pages carried 150+ controls and several thousand tokens
+  per observation without it. Merging by target alone was tried and
+  reverted: it hid an "Apply now" button whose mailto the text had already
+  linked by address.
+- The text excerpt is the full text up to 16,000 characters; beyond that
+  the verbatim head (12,000) and tail (4,000) with a marked gap and
+  `text_truncated`. A head-only excerpt lost "how to apply" on a live
+  company page, and every intake page observed so far exceeded the old
+  6,000-character cap. Citations are checked against the full text.
 - Up to six provider attempts per reading (three steps plus one repair
   each). Usage counts returned responses; failed requests may expose no
   token counts and are not assumed free.

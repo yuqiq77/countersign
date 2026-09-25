@@ -6,19 +6,29 @@ in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-25 |
-| Branch | `main`, no remote. Evidence loop: `8f42628`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
+| As of | 2026-09-26 |
+| Branch | `main`, no remote. Reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
-| Current focus | Prior-assessment input and round history are committed and automatically verified. Deploy the amendment, then verify summary wording, anchoring and history navigation alongside the remaining live checks. |
+| Current focus | Reader evidence fixes are committed and automatically verified. Confirm the deployed reader and prior-assessment amendment against the remaining live checks. |
 
 ## Current implementation
 
 - **Reader (ADR-012):** bounded FOLLOW/RENDER loop inside `verify_status`;
-  at most 120 controls per observation, 120 seconds after the initial
-  fetch, three model steps, two follows and one schema repair per step.
-  `page-reader/0.3.0` requires an explicit apply-entry choice, including
-  `NONE`; reasons and notes are persisted. Replay a stored observation
-  with `python -m countersign.diagnostics.replay_reading <case or snapshot id>`.
+  at most 120 controls per observation (exact label/target duplicates
+  merged, document order), text up to 16,000 characters and beyond that
+  the verbatim head and tail with a marked gap (`text_truncated`), 120
+  seconds after the initial fetch, three model steps, two follows and one
+  schema repair per step. `page-reader/0.4.0` requires an explicit
+  apply-entry choice, including `NONE`; reasons and notes are persisted.
+  Replay a stored observation with
+  `python -m countersign.diagnostics.replay_reading <case or snapshot id>`.
+  JSON-LD citations are checked against observed fields: `directApply`
+  must be true and its key/value pair cited with quoting/spacing tolerance
+  and word boundaries; `validThrough` must be nonempty and its full value
+  included in the citation. A model-cited expiry prevents a redundant
+  code-added expiry for that observation. The sanitized company-page
+  fixture covers late application instructions and differently labelled
+  links sharing a mailto target.
 - **Rendering:** a page with no visible HTML text and no controls gets a
   recorded step-0 pre-render, including JSON-LD-only shells. Docker ships
   Chromium; host runs use `COUNTERSIGN_CHROMIUM_PATH`. Rendering is
@@ -68,25 +78,34 @@ in the gitignored `HANDOFF.md`.
 
 ## Verification and deployment
 
-Code commit `6e8b81c` was checked on 2026-09-25 in a fresh detached
+Code commit `3d3377e` was checked on 2026-09-26 in a fresh detached
 worktree and Python 3.14.3 venv, with front-end dependencies installed
 from `pnpm-lock.yaml`:
 
 - `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
   107 Python files; `.venv/bin/pyright`: 0 errors;
   `.venv/bin/lint-imports`: 3 contracts kept.
-- `.venv/bin/pytest`: **171 passed, no skips**. PostgreSQL integration used
-  disposable database `countersign_assessment_code_check` at
-  `127.0.0.1:49380` in a separate temporary container. Other database
+- `.venv/bin/pytest -ra`: **196 passed, no skips**. PostgreSQL integration used
+  disposable database `countersign_reader_code_check` at
+  `127.0.0.1:50867` in a separate temporary container. Other database
   fixtures used SQLite; Temporal used its test server; rendering used real
   local Chromium. Private profile and salary inputs were unset; model
-  providers were fakes. Coverage includes a retried round-2 evaluation
-  retaining round 1 as its predecessor and recovery of older records'
-  rounds.
+  providers were fakes. Coverage includes excerpt truncation, exact
+  label/target deduplication, JSON-LD quoting and incorrect-field/value
+  rejection, alongside the existing workflow and approval regressions.
 - `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
 - Changed files were checked for operator-specific identifiers,
   credential-like values and private paths; no matches. A full gitleaks
   scan remains a publication prerequisite.
+
+The documentation layer repeated all commands above in a second fresh
+detached worktree and venv, using disposable PostgreSQL database
+`countersign_reader_docs_check` at the same temporary endpoint:
+**196 passed, no skips**, with all static and web checks passing again.
+
+Deployment was not rechecked or changed during this review; no live model
+calls were made. Existing saved-page replay evidence remains in the
+private handoff.
 
 **Running-stack evidence, 2026-09-25:** read-only PostgreSQL inspection of
 an owner-tested case confirmed two retained verifications, evaluations
@@ -107,8 +126,9 @@ cleanup/commit round.
    without salary plus a note containing salary (extraction must remain
    empty and compensation UNKNOWN). Broader reader/approval checks remain:
    direct ATS, board → ATS, client-rendered shell and attested approval.
-2. Deploy `6e8b81c` (`evaluator/0.3.1`) and verify the round pager. Watch
-   amended live summaries for what the note resolved and what remains,
+2. Confirm deployment includes `3d3377e` (`page-reader/0.4.0`) and
+   `6e8b81c` (`evaluator/0.3.1`); verify the corrected reader and round pager.
+   Watch amended live summaries for what the note resolved and what remains,
    without restated rules; check more than one model for anchoring on an
    earlier inference about the candidate. Four identical-input replays
    showed score variation of ±1; small cross-round changes need caution
@@ -126,6 +146,10 @@ cleanup/commit round.
 - Company pages still require official-domain mapping; several boards
   fall into COMPANY_CONTROLLED and TRUSTED_BOARD_REDIRECT is not assigned.
   Allowing board evidence alone to permit plain APPROVE is a policy decision.
+  A button without an href can establish an application entry but cannot
+  be FOLLOWed; RENDER does not click it. Slice 2's domain mapping and ATS
+  adapters do not promise generic JS-button navigation. Additional reader
+  actions require a new ADR; attestation remains the current approval path.
 - Cross-host script dependencies can prevent complete rendering;
   synchronous DNS/library calls are not forcibly cancelled by the reading
   budget. Citation checks establish provenance, not semantic correctness.
