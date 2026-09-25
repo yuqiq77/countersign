@@ -130,7 +130,8 @@ def get_case(case_id: str) -> CaseDetail:
             raise HTTPException(status_code=404, detail="unknown case")
         approval = repo.approval_for_case(session, case_id)
         verification = repo.latest_verification(session, case_id)
-        evaluation = repo.latest_evaluation(session, case_id)
+        evaluations = repo.evaluations_for_case(session, case_id)
+        evaluation = evaluations[-1] if evaluations else None
         gated = (
             gated_decision(evaluation.evaluation, verification)
             if evaluation is not None and verification is not None
@@ -147,6 +148,7 @@ def get_case(case_id: str) -> CaseDetail:
             evaluation=evaluation,
             gated_decision=gated,
             approval=repo.approval_view(approval) if approval is not None else None,
+            evaluations=evaluations,
             operator_context=repo.operator_context(session, case_id),
             in_flight=repo.in_flight(session, case_id),
         )

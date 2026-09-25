@@ -345,3 +345,55 @@ def test_in_flight_covers_the_re_round_but_not_a_dead_end() -> None:
         _walk_to(session, "c2", [CaseState.REJECTED])
         assert repo.in_flight(session, "c2") is False
         assert repo.in_flight(session, "missing") is False
+
+
+def test_evaluation_rounds_are_recovered_for_records_written_without_one() -> None:
+    """Records from `evaluator/0.3.0` carry no `generation`; the round comes
+    from the approval that pinned the evaluation, else from its position."""
+
+    from countersign.gateway.evaluator import run_evaluation
+    from countersign.gateway.fake_provider import FakeEvaluationProvider
+    from countersign.persistence.models import EvaluationRunRow
+    from countersign.policy.defaults import salary_bands
+
+    def evaluate(generation: int, text: str):
+        return run_evaluation(
+            FakeEvaluationProvider(),
+            case_id="c1",
+            content_hash="abc",
+            url="https://example.com/j/1",
+            title="Engineer",
+            text=text,
+            verification=None,
+            bands=salary_bands(),
+            generation=generation,
+        )
+
+    with session_scope() as session:
+        repo.create_case(session, case_id="c1", url="https://example.com/j/1")
+        first = evaluate(1, "round one")
+        second = evaluate(2, "round two")
+        repo.record_evaluation(session, first)
+        repo.record_evaluation(session, second)
+        for row in session.scalars(select(EvaluationRunRow)):
+            row.payload = {
+                k: v
+                for k, v in row.payload.items()
+                if k not in ("generation", "previous_evaluation_id")
+            }
+    with session_scope() as session:
+        assert [r.generation for r in repo.evaluations_for_case(session, "c1")] == [1, 2]
+        latest = repo.latest_evaluation(session, "c1")
+        assert latest is not None and latest.generation == 2
+        row = repo.create_approval_request(
+            session,
+            case_id="c1",
+            generation=1,
+            allowed=[ApprovalDecision.REJECT],
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+            evaluation_id=first.evaluation_id,
+        )
+        pinned = repo.pinned_evaluation(session, row.id)
+        assert pinned is not None
+        assert (pinned.evaluation_id, pinned.generation) == (first.evaluation_id, 1)
+        assert repo.pinned_evaluation(session, "appr-c1-g9") is None

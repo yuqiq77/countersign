@@ -90,6 +90,8 @@ class CaseDetail(ContractModel):
     evaluation: EvaluationRecord | None
     gated_decision: EvalDecision | None
     approval: ApprovalRequestView | None
+    # Every round's evaluation, oldest first; `evaluation` is the last one.
+    evaluations: list[EvaluationRecord]
     operator_context: list[OperatorContext]
     # Derived from stored records: the workflow may still move this case,
     # including the evidence-loop re-round that passes through

@@ -76,7 +76,14 @@ class ModelEvaluation(ContractModel):
     distinctive_assets: list[DistinctiveAsset] = Field(default_factory=lambda: [])
     risk_flags: list[RiskFlag] = Field(default_factory=lambda: [])
     confidence: float = Field(ge=0.0, le=1.0)
-    summary: str
+    summary: str = Field(
+        description=(
+            "For the reviewer, who knows how this system works: the decision and "
+            "its main reasons in three to six plain sentences. When operator context "
+            "or a previous assessment changed the reading, say what it resolved and "
+            "what remains open. No description of process, no restated rules."
+        )
+    )
 
 
 class ModelUsage(ContractModel):
@@ -108,3 +115,8 @@ class EvaluationRecord(ContractModel):
     # Decision ids of the operator context this evaluation was given
     # (ADR-014); empty before the evidence loop existed or when none was.
     operator_context_ids: list[str] = Field(default_factory=lambda: [])
+    # Evidence-loop round (ADR-014); 1 for records written before rounds.
+    generation: int = 1
+    # The previous round's evaluation shown to the model as a revisable
+    # judgment; None on the first round or for records written before this.
+    previous_evaluation_id: str | None = None

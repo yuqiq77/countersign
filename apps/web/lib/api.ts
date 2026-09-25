@@ -64,6 +64,9 @@ export interface EvaluationView {
     latency_ms: number;
     repair_attempts: number;
   };
+  operator_context_ids: string[];
+  generation: number;
+  previous_evaluation_id: string | null;
 }
 
 export interface CaseDetail {
@@ -88,6 +91,8 @@ export interface CaseDetail {
     content_changed: boolean | null;
   } | null;
   evaluation: EvaluationView | null;
+  // Every round's evaluation, oldest first; `evaluation` is the last one.
+  evaluations: EvaluationView[];
   gated_decision: string | null;
   approval: ApprovalRequestView | null;
   operator_context: OperatorContext[];

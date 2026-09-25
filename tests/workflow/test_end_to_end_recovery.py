@@ -446,6 +446,10 @@ async def test_request_evidence_re_evaluates_with_the_reviewers_note() -> None:
                 evaluation = repo.latest_evaluation(session, second.case_id)
                 assert evaluation is not None
                 assert evaluation.operator_context_ids == [context[0].decision_id]
+                history = repo.evaluations_for_case(session, second.case_id)
+                assert [e.generation for e in history] == [1, 2]
+                assert history[0].previous_evaluation_id is None
+                assert evaluation.previous_evaluation_id == history[0].evaluation_id
                 approval = repo.approval_for_case(session, second.case_id)
                 assert approval is not None and approval.generation == 2
             await handle.signal(
@@ -491,6 +495,22 @@ async def test_request_evidence_re_evaluates_with_the_reviewers_note() -> None:
         assert audit_actions.count("case.state.official_source_verified") == 2
         assert audit_actions.count("case.state.needs_more_evidence") == 1
         assert audit_actions.count("case.round.continued") == 1
+        history = repo.evaluations_for_case(session, case_id)
+
+    # A retried round-2 evaluate Activity (completion lost after the record
+    # was persisted) must still name round 1 as its predecessor, not the
+    # round-2 record it finds as "latest".
+    retried = case_activities.evaluate_case(
+        CaseWorkflowInput(case_id=case_id, url=JOB_URL, generation=2)
+    )
+    assert retried.record.evaluation_id == history[1].evaluation_id
+    assert retried.record.previous_evaluation_id == history[0].evaluation_id
+    assert retried.record.generation == 2
+    with session_scope() as session:
+        assert [e.evaluation_id for e in repo.evaluations_for_case(session, case_id)] == [
+            history[0].evaluation_id,
+            history[1].evaluation_id,
+        ]
 
 
 @pytest.mark.usefixtures("db", "fake_network")

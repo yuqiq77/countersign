@@ -435,13 +435,58 @@ def _latest_evaluation_row(session: Session, case_id: str) -> EvaluationRunRow |
     return session.scalars(stmt).first()
 
 
-def latest_evaluation(session: Session, case_id: str) -> EvaluationRecord | None:
-    row = _latest_evaluation_row(session, case_id)
-    if row is None:
-        return None
+def _evaluation_record(row: EvaluationRunRow, generation: int) -> EvaluationRecord:
     # Self-produced JSON payload: validated laxly at this one boundary
     # because it was dumped in JSON mode (enums/datetimes as strings).
-    return EvaluationRecord.model_validate(row.payload, strict=False)
+    record = EvaluationRecord.model_validate(row.payload, strict=False)
+    if "generation" not in row.payload:
+        # Written before records carried their round: recover it from the
+        # approval that pinned this evaluation, else from its position
+        # (one evaluation per round, oldest first).
+        record = record.model_copy(update={"generation": generation})
+    return record
+
+
+def evaluations_for_case(session: Session, case_id: str) -> list[EvaluationRecord]:
+    """Every round's evaluation, oldest first (ADR-014 history)."""
+
+    stmt = (
+        select(EvaluationRunRow)
+        .where(EvaluationRunRow.case_id == case_id)
+        .order_by(EvaluationRunRow.created_at.asc(), EvaluationRunRow.id.asc())
+    )
+    pinned = {
+        approval.evaluation_id: approval.generation
+        for approval in session.scalars(
+            select(ApprovalRequestRow).where(ApprovalRequestRow.case_id == case_id)
+        )
+        if approval.evaluation_id is not None
+    }
+    return [
+        _evaluation_record(row, pinned.get(row.id, position))
+        for position, row in enumerate(session.scalars(stmt), start=1)
+    ]
+
+
+def latest_evaluation(session: Session, case_id: str) -> EvaluationRecord | None:
+    records = evaluations_for_case(session, case_id)
+    return records[-1] if records else None
+
+
+def pinned_evaluation(session: Session, approval_request_id: str) -> EvaluationRecord | None:
+    """The evaluation an approval request pinned: the judgment of that round.
+
+    The previous round's input for the evaluator comes from here, not from
+    "the latest evaluation": a retried evaluate Activity has already
+    persisted this round's own record, and "latest" would hand the round
+    its own judgment as its predecessor.
+    """
+
+    approval = session.get(ApprovalRequestRow, approval_request_id)
+    if approval is None or approval.evaluation_id is None:
+        return None
+    row = session.get(EvaluationRunRow, approval.evaluation_id)
+    return None if row is None else _evaluation_record(row, approval.generation)
 
 
 def latest_evaluation_id(session: Session, case_id: str) -> str | None:

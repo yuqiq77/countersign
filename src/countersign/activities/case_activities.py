@@ -345,8 +345,18 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
         case = repo.get_case(session, payload.case_id)
         title = case.title if case is not None else None
         # Reviewer notes from earlier rounds ride along as human-asserted
-        # context (ADR-014); the record names the decisions it consumed.
+        # context, and the previous round's assessment as a revisable
+        # judgment (ADR-014); the record names both. The previous round is
+        # the evaluation its approval pinned — never "the latest", which on
+        # a retried Activity is this round's own, already persisted record.
         context = repo.operator_context(session, payload.case_id)
+        previous = (
+            repo.pinned_evaluation(
+                session, ids.approval_request_id(payload.case_id, payload.generation - 1)
+            )
+            if payload.generation > 1
+            else None
+        )
     normalized = normalize_html(body)
 
     # Marks the activity attempt only; the provider-boundary lines live in
@@ -365,6 +375,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             bands=salary_bands(),
             profile=load_operator_profile(),
             operator_context=context,
+            previous=previous,
             generation=payload.generation,
         )
     except (ContractFailure, ProviderRefusal) as exc:

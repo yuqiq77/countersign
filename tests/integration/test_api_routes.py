@@ -505,6 +505,7 @@ async def test_case_detail_exposes_operator_context_and_in_flight(
         legacy = (await client.get("/v1/cases/c1")).json()
     # Decided before the loop existed: no continued-round record, so final.
     assert legacy["in_flight"] is False
+    assert legacy["evaluations"] == [] and legacy["evaluation"] is None
     with session_scope() as session:
         repo.mark_round_continued(session, case_id="c1", next_generation=2)
     async with _client() as client:

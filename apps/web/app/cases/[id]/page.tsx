@@ -60,6 +60,9 @@ export default function CaseDetailPage() {
   const [attestNote, setAttestNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which round's evaluation is shown; null means the latest, and a new
+  // round arriving snaps the view back to it.
+  const [roundIndex, setRoundIndex] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (document.hidden) return;
@@ -92,6 +95,11 @@ export default function CaseDetailPage() {
     setAttestNote("");
   }, [approvalId]);
 
+  const roundCount = detail?.evaluations.length ?? 0;
+  useEffect(() => {
+    setRoundIndex(null);
+  }, [roundCount]);
+
   async function decide(decision: string, attestation?: Attestation) {
     if (!detail?.approval || !reason.trim()) {
       setError("A reason is required for every decision.");
@@ -121,7 +129,16 @@ export default function CaseDetailPage() {
     );
   }
 
-  const evaluation = detail.evaluation?.evaluation;
+  const rounds = detail.evaluations;
+  const shownIndex = roundIndex ?? rounds.length - 1;
+  const shownRound = rounds[shownIndex] ?? null;
+  const evaluation = shownRound?.evaluation;
+  const isLatestRound = shownIndex === rounds.length - 1;
+  const notesSeen = shownRound
+    ? detail.operator_context.filter((c) =>
+        shownRound.operator_context_ids.includes(c.decision_id),
+      )
+    : [];
   const canDecide =
     detail.state === "PENDING_APPROVAL" && detail.approval?.status === "PENDING";
   const approveAllowed = detail.approval?.allowed_decisions.includes("APPROVE") ?? false;
@@ -202,28 +219,67 @@ export default function CaseDetailPage() {
         </div>
       </section>
 
-      {evaluation && detail.evaluation ? (
+      {evaluation && shownRound ? (
         <section className="rounded-2xl border border-neutral-800 p-5">
-          <h2 className="mb-3 font-medium text-neutral-300">
-            Evaluation{" "}
-            <span className="ml-2 text-xs text-neutral-500">
-              {detail.evaluation.policy_version} · {detail.evaluation.prompt_version} ·{" "}
-              {detail.evaluation.usage.model_id} ·{" "}
-              {detail.evaluation.usage.input_tokens}/
-              {detail.evaluation.usage.output_tokens} tok ·{" "}
-              {detail.evaluation.usage.latency_ms} ms
+          <h2 className="mb-3 flex flex-wrap items-center gap-2 font-medium text-neutral-300">
+            <span>
+              Evaluation · round {shownRound.generation} of {rounds.length}
+            </span>
+            {rounds.length > 1 ? (
+              /* Every round's judgment is kept; the pager shows earlier ones
+                 as they were, never rewritten by a later round. */
+              <span className="flex items-center gap-1 text-xs">
+                <button
+                  onClick={() => setRoundIndex(Math.max(0, shownIndex - 1))}
+                  disabled={shownIndex === 0}
+                  className="rounded-lg border border-neutral-700 px-2 py-0.5 disabled:opacity-40"
+                  aria-label="Previous round"
+                >
+                  ‹
+                </button>
+                <button
+                  onClick={() => setRoundIndex(Math.min(rounds.length - 1, shownIndex + 1))}
+                  disabled={isLatestRound}
+                  className="rounded-lg border border-neutral-700 px-2 py-0.5 disabled:opacity-40"
+                  aria-label="Next round"
+                >
+                  ›
+                </button>
+              </span>
+            ) : null}
+            <span className="text-xs text-neutral-500">
+              {shownRound.policy_version} · {shownRound.prompt_version} ·{" "}
+              {shownRound.usage.model_id} · {shownRound.usage.input_tokens}/
+              {shownRound.usage.output_tokens} tok · {shownRound.usage.latency_ms} ms
             </span>
           </h2>
+          {!isLatestRound ? (
+            <p className="mb-3 text-xs text-amber-400">
+              Superseded by round {rounds[rounds.length - 1]?.generation}. The model&apos;s
+              recommendation is shown as it was; the gate result of that round is not.
+            </p>
+          ) : null}
+          {notesSeen.length > 0 ? (
+            <p className="mb-3 text-xs text-neutral-500">
+              With your context:{" "}
+              {notesSeen.map((c) => `“${c.text}”`).join(" · ")}
+            </p>
+          ) : null}
           <p className="mb-3 text-neutral-300">
-            Decision: <strong>{detail.gated_decision ?? evaluation.decision}</strong>
-            {detail.gated_decision && detail.gated_decision !== evaluation.decision ? (
+            {isLatestRound ? "Decision" : "Model recommendation"}:{" "}
+            <strong>
+              {isLatestRound ? (detail.gated_decision ?? evaluation.decision) : evaluation.decision}
+            </strong>
+            {isLatestRound &&
+            detail.gated_decision &&
+            detail.gated_decision !== evaluation.decision ? (
               <span className="ml-1 text-xs text-amber-400">
                 (model proposed {evaluation.decision}; gated — status not verified OPEN)
               </span>
             ) : null}{" "}
             · Seniority:{" "}
             {evaluation.seniority_fit} · Compensation:{" "}
-            {detail.evaluation.compensation_signal}
+            {shownRound.compensation_signal}
           </p>
           <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {SCORE_KEYS.map(([key, label]) => (

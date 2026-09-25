@@ -1,7 +1,10 @@
 """Gateway behavior: determinism, repair budget, deterministic signal."""
 
+from datetime import UTC, datetime
+
 import pytest
 
+from countersign.contracts.cases import OperatorContext
 from countersign.contracts.enums import (
     CompensationSignal,
     EvalDecision,
@@ -255,9 +258,6 @@ def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() 
     posting text and never in the cached system prompt, and the record names
     the decisions it consumed."""
 
-    from datetime import UTC, datetime
-
-    from countersign.contracts.cases import OperatorContext
     from countersign.gateway.evaluator import build_system_prompt, build_user_prompt
 
     notes = [
@@ -305,5 +305,66 @@ def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() 
         generation=2,
     )
     assert record.operator_context_ids == ["dec-appr-case-1-g1-v1"]
-    assert record.prompt_version == "evaluator/0.3.0"
+    assert record.prompt_version == "evaluator/0.3.1"
+    assert record.generation == 2
     assert run(FakeEvaluationProvider()).operator_context_ids == []
+
+
+def test_previous_assessment_is_a_labelled_revisable_input_and_is_cited() -> None:
+    """ADR-014 amendment: the previous round's structured evaluation goes to
+    the model as a judgment, not evidence, after the posting and before the
+    operator context; the new record references it; the summary contract
+    says what the summary is for."""
+
+    from countersign.contracts.evaluation import ModelEvaluation
+    from countersign.gateway.evaluator import build_system_prompt, build_user_prompt
+
+    first = run(FakeEvaluationProvider())
+    assert first.generation == 1 and first.previous_evaluation_id is None
+
+    user = build_user_prompt(
+        url="https://example.com/jobs/1",
+        title="Engineer",
+        text="A job posting body.",
+        verification=None,
+        previous=first,
+        operator_context=[
+            OperatorContext(
+                decision_id="dec-1",
+                supplied_at=datetime(2026, 9, 25, tzinfo=UTC),
+                text="a note",
+            )
+        ],
+    )
+    posting_end = user.index("--- END POSTING TEXT ---")
+    previous_at = user.index("--- PREVIOUS MODEL ASSESSMENT (revisable judgment, not evidence) ---")
+    context_at = user.index("--- OPERATOR-SUPPLIED CONTEXT")
+    assert posting_end < previous_at < context_at
+    assert f'"evaluation_id": "{first.evaluation_id}"' in user
+    assert '"round": 1' in user
+    assert '"confidence"' not in user  # uncalibrated self-report stays out
+    assert "PREVIOUS MODEL ASSESSMENT" not in build_user_prompt(
+        url="https://example.com/jobs/1", title="Engineer", text="body", verification=None
+    )
+
+    system = build_system_prompt()
+    assert "revisable judgment, not evidence" in system
+    assert "acknowledge it once in plain language" in system
+    assert "explicitly attribute" not in system
+    description = ModelEvaluation.model_json_schema()["properties"]["summary"]["description"]
+    assert "No description of process" in description
+
+    second = run_evaluation(
+        FakeEvaluationProvider(),
+        case_id="case-1",
+        content_hash="abc123def4567890",
+        url="https://example.com/jobs/1",
+        title="Engineer",
+        text="A job posting body.",
+        verification=None,
+        bands=BANDS,
+        previous=first,
+        generation=2,
+    )
+    assert second.previous_evaluation_id == first.evaluation_id
+    assert second.generation == 2
