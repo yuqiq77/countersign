@@ -12,6 +12,7 @@ ADRs capture decisions that constrain implementation. They are append-only decis
 | [ADR-011](011-bounded-company-research-loop.md) | Bounded company-research loop activates model-invoked capabilities | Accepted |
 | [ADR-012](012-bounded-page-reader.md) | Bounded page reader in front of verification: the model chooses render/follow/done inside code-enforced budgets; code binds citations to observed controls and sources, decides status, and degrades conservatively | Accepted |
 | [ADR-013](013-human-attestation-for-unverified-postings.md) | `UNVERIFIED` replaces `UNKNOWN_STALE_RISK`; a reviewer may approve an unverified posting only with a typed attestation, re-checked by the API against the pinned verification and audited as its own human event | Accepted |
+| [ADR-014](014-evidence-loop-through-request-evidence.md) | The reason of a `REQUEST_EVIDENCE` decision is the operator-supplied context; the decision starts the next generation (re-verify, re-evaluate with the context attributed, new approval), bounded to three rounds | Accepted |
 
 The implementation baseline is [Architecture v4](../job-search-agent-architecture-v4.md).
 

@@ -114,9 +114,15 @@ retry evidence; private case details stay outside tracked documentation.
    board → ATS, a client-rendered shell (step-0 RENDER), and one attested
    approval. The two company-page runs and container browser launch are
    verified; they do not cover these remaining paths.
-2. Before publication, run gitleaks and inspect tracked content. The owner
+2. Implement [Ticket 001](tickets/001-evidence-loop.md) before Slice 2:
+   ADR-014 is accepted and v4 §20 now specifies one workflow ID per case,
+   Continue-As-New between rounds, and generation-scoped artifact identities.
+   The evidence loop is not implemented yet; REQUEST_EVIDENCE still ends
+   the current workflow. Deployment of the new ID format waits until old
+   pending approvals are decided or expired.
+3. Before publication, run gitleaks and inspect tracked content. The owner
    adds the remote and pushes.
-3. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
+4. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
    mapping, ATS adapters, scans and stale rechecks, capability/route
    registries, calibration, traces and cost dashboard. Tickets are
    owner-read before implementation. Slice 2.5 research follows ADR-011

@@ -507,7 +507,7 @@ Initial SLOs, all testable at n=1: no lost case after restart; zero duplicate si
 
 Reliability policy defines transient, permanent, contract, authorization, budget, conflict, defect, and human-timeout failure classes with per-class handling. Timeout and retry defaults are versioned per capability; `Retry-After` is honored; non-retryable classes are explicit; exhausted work lands in a searchable failure inbox — no invisible infinite retry.
 
-Idempotency: `Idempotency-Key` on mutating APIs; stable workflow IDs (`job-case/{case_id}/{generation}`); upsert/compare-and-set Activity writes; request fingerprints on tool executions; snapshot dedup by adapter+ID+hash; Signal dedup by request+decision version; transactional outbox for events. Temporal gives at-least-once execution; these rules give effectively-once business effects.
+Idempotency: `Idempotency-Key` on mutating APIs; one stable workflow ID per case (`job-case/{case_id}`), shared across evidence-loop rounds through Continue-As-New; `generation` carried in workflow inputs and included in the identities of readings, verifications, evaluations, and approval requests (ADR-014); upsert/compare-and-set Activity writes; request fingerprints on tool executions; snapshot dedup by adapter+ID+hash; Signal dedup by approval request + decision version, with each run accepting only its generation's approval request; transactional outbox for events. Temporal gives at-least-once execution; these rules give effectively-once business effects.
 
 ---
 
