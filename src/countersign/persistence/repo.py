@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from countersign.contracts.cases import ApprovalRequestView, CaseSummary
+from countersign.contracts.cases import ApprovalRequestView, CaseSummary, OperatorContext
 from countersign.contracts.enums import (
     ActorType,
     ApprovalDecision,
@@ -24,7 +24,14 @@ from countersign.contracts.evaluation import EvaluationRecord
 from countersign.contracts.page_reading import PageReadingRecord
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
-from countersign.domain.states import assert_transition, can_transition, is_retry_noop
+from countersign.domain.gates import MAX_GENERATIONS
+from countersign.domain.ids import approval_request_id, verification_id
+from countersign.domain.states import (
+    IN_FLIGHT_STATES,
+    assert_transition,
+    can_transition,
+    is_retry_noop,
+)
 from countersign.persistence.models import (
     ApprovalRequestRow,
     AuditEventRow,
@@ -459,7 +466,7 @@ def create_approval_request(
 ) -> ApprovalRequestRow:
     """Create the durable approval request for a case generation (idempotent)."""
 
-    approval_id = f"appr-{case_id}-g{generation}"
+    approval_id = approval_request_id(case_id, generation)
     existing = session.get(ApprovalRequestRow, approval_id)
     if existing is not None:
         return existing
@@ -515,6 +522,89 @@ def approval_view(row: ApprovalRequestRow) -> ApprovalRequestView:
         snapshot_id=row.snapshot_id,
         verification_id=row.verification_id,
         evaluation_id=row.evaluation_id,
+        generation=row.generation,
+        max_generations=MAX_GENERATIONS,
+    )
+
+
+def _round_audit_id(case_id: str, generation: int) -> str:
+    return f"aud-round-{case_id}-g{generation}"
+
+
+def mark_round_continued(
+    session: Session, *, case_id: str, next_generation: int, workflow_id: str | None = None
+) -> None:
+    """Record that a REQUEST_EVIDENCE decision opens the next round (ADR-014).
+
+    Written by the Activity that persists the decision, before the workflow
+    continues; `in_flight` relies on it rather than inferring a re-round
+    from the decision alone, so cases decided under earlier code (whose
+    workflows ended there) are not reported as waiting for a round that
+    never comes.
+    """
+
+    append_audit(
+        session,
+        audit_id=_round_audit_id(case_id, next_generation),
+        actor_type=ActorType.SERVICE,
+        actor_id="worker",
+        action="case.round.continued",
+        resource_type="job_case",
+        resource_id=case_id,
+        reason=f"REQUEST_EVIDENCE opens round {next_generation}",
+        workflow_id=workflow_id,
+    )
+
+
+def round_continued(session: Session, case_id: str, generation: int) -> bool:
+    return session.get(AuditEventRow, _round_audit_id(case_id, generation)) is not None
+
+
+def operator_context(session: Session, case_id: str) -> list[OperatorContext]:
+    """The reasons of REQUEST_EVIDENCE decisions on this case, oldest first (ADR-014)."""
+
+    stmt = (
+        select(HumanDecisionRow)
+        .join(ApprovalRequestRow, HumanDecisionRow.approval_request_id == ApprovalRequestRow.id)
+        .where(
+            ApprovalRequestRow.case_id == case_id,
+            HumanDecisionRow.decision == ApprovalDecision.REQUEST_EVIDENCE.value,
+        )
+        .order_by(HumanDecisionRow.created_at.asc(), HumanDecisionRow.id.asc())
+    )
+    return [
+        OperatorContext(decision_id=row.id, supplied_at=ensure_utc(row.created_at), text=row.reason)
+        for row in session.scalars(stmt)
+    ]
+
+
+def in_flight(session: Session, case_id: str) -> bool:
+    """Whether the workflow may still move this case, from stored records only.
+
+    The pipeline states count; so does NEEDS_MORE_EVIDENCE while an
+    evidence-loop re-round is due: the next round was recorded as continued
+    (`case.round.continued`) and has not verified yet. Once that
+    verification row exists the round has either moved on (and the state
+    shows it) or ended at an empty body. A case that reached
+    NEEDS_MORE_EVIDENCE without that record — an empty body, or a
+    REQUEST_EVIDENCE decided before the loop existed — is final.
+    """
+
+    row = session.get(JobCaseRow, case_id)
+    if row is None:
+        return False
+    state = CaseState(row.state)
+    if state in IN_FLIGHT_STATES:
+        return True
+    if state != CaseState.NEEDS_MORE_EVIDENCE:
+        return False
+    approval = approval_for_case(session, case_id)
+    if approval is None or approval.generation >= MAX_GENERATIONS:
+        return False
+    next_generation = approval.generation + 1
+    return (
+        round_continued(session, case_id, next_generation)
+        and session.get(VerificationRow, verification_id(case_id, next_generation)) is None
     )
 
 

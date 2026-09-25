@@ -20,17 +20,6 @@ const SCORE_KEYS = [
   ["transition_feasibility", "Transition feasibility"],
 ] as const;
 
-// States the workflow can still move on its own; anything else stops polling.
-const IN_FLIGHT_STATES = new Set([
-  "DISCOVERED",
-  "SNAPSHOTTED",
-  "NORMALIZED",
-  "DEDUPLICATED",
-  "OFFICIAL_SOURCE_VERIFIED",
-  "EVALUATED",
-  "PENDING_APPROVAL",
-]);
-
 // What each verification status means for the reviewer. The enum value stays
 // visible beside it; the recorded reason follows on the next line.
 const STATUS_COPY: Record<string, string> = {
@@ -57,7 +46,7 @@ const DECISION_LABELS: Record<string, { label: string; className: string }> = {
       "rounded-xl bg-red-700 px-5 py-2 font-medium text-white disabled:opacity-50",
   },
   REQUEST_EVIDENCE: {
-    label: "Request evidence",
+    label: "Add context and re-evaluate",
     className:
       "rounded-xl border border-neutral-600 px-5 py-2 font-medium disabled:opacity-50",
   },
@@ -82,14 +71,26 @@ export default function CaseDetailPage() {
     }
   }, [params.id]);
 
-  const inFlight = detail === null || IN_FLIGHT_STATES.has(detail.state);
+  // The server decides whether the workflow may still move the case; the
+  // evidence-loop re-round passes through NEEDS_MORE_EVIDENCE, so a state
+  // list here would stop polling exactly when the next round is coming.
+  const inFlight = detail === null || detail.in_flight;
 
   useEffect(() => {
     void refresh();
-    if (!inFlight) return; // decided/quarantined/closed cases cannot change
+    if (!inFlight) return;
     const timer = setInterval(() => void refresh(), 4000);
     return () => clearInterval(timer);
   }, [refresh, inFlight]);
+
+  // A new round brings a new approval request: nothing typed for the
+  // previous one carries over, least of all an attestation.
+  const approvalId = detail?.approval?.approval_request_id ?? null;
+  useEffect(() => {
+    setReason("");
+    setAttest(false);
+    setAttestNote("");
+  }, [approvalId]);
 
   async function decide(decision: string, attestation?: Attestation) {
     if (!detail?.approval || !reason.trim()) {
@@ -124,6 +125,8 @@ export default function CaseDetailPage() {
   const canDecide =
     detail.state === "PENDING_APPROVAL" && detail.approval?.status === "PENDING";
   const approveAllowed = detail.approval?.allowed_decisions.includes("APPROVE") ?? false;
+  const reEvaluationAllowed =
+    detail.approval?.allowed_decisions.includes("REQUEST_EVIDENCE") ?? false;
   const attestable =
     canDecide &&
     !approveAllowed &&
@@ -263,8 +266,26 @@ export default function CaseDetailPage() {
       {detail.approval ? (
         <section className="rounded-2xl border border-neutral-800 p-5">
           <h2 className="mb-2 font-medium text-neutral-300">
-            Approval · {detail.approval.status}
+            Approval · {detail.approval.status} · round {detail.approval.generation} of{" "}
+            {detail.approval.max_generations}
           </h2>
+          {detail.operator_context.length > 0 ? (
+            <div className="mb-3">
+              <h3 className="text-xs font-medium uppercase text-neutral-500">
+                Context you supplied
+              </h3>
+              <ul className="mt-1 list-inside list-disc text-neutral-400">
+                {detail.operator_context.map((c) => (
+                  <li key={c.decision_id}>
+                    <span className="text-neutral-500">
+                      {new Date(c.supplied_at).toLocaleDateString()}
+                    </span>{" "}
+                    {c.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {canDecide ? (
             <div className="space-y-3">
               <textarea
@@ -274,6 +295,19 @@ export default function CaseDetailPage() {
                 className="w-full rounded-xl border border-neutral-700 bg-transparent px-4 py-2 outline-none focus:border-emerald-500"
                 rows={2}
               />
+              {reEvaluationAllowed ? (
+                <p className="text-xs text-neutral-500">
+                  Add context and re-evaluate: your note is recorded as your decision.
+                  The posting is read again and evaluated again with your note as
+                  operator-supplied context. Facts about you in general belong in
+                  your profile.
+                </p>
+              ) : (
+                <p className="text-xs text-neutral-500">
+                  Re-evaluation rounds used ({detail.approval.generation} of{" "}
+                  {detail.approval.max_generations}): approve or reject.
+                </p>
+              )}
               {/* The server owns the allowed set (lifecycle gate): render it,
                   never a hardcoded trio. */}
               <div className="flex gap-3">

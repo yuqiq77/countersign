@@ -22,6 +22,16 @@ export interface ApprovalRequestView {
   snapshot_id: string | null;
   verification_id: string | null;
   evaluation_id: string | null;
+  generation: number;
+  max_generations: number;
+}
+
+// Context the reviewer supplied with an earlier "Add context and
+// re-evaluate" decision (ADR-014); the next evaluation cited it.
+export interface OperatorContext {
+  decision_id: string;
+  supplied_at: string;
+  text: string;
 }
 
 export interface EvaluationView {
@@ -80,6 +90,10 @@ export interface CaseDetail {
   evaluation: EvaluationView | null;
   gated_decision: string | null;
   approval: ApprovalRequestView | null;
+  operator_context: OperatorContext[];
+  // Server-derived: the workflow may still move the case (including the
+  // evidence-loop re-round). Poll while true.
+  in_flight: boolean;
 }
 
 export async function listCases(): Promise<CaseSummary[]> {

@@ -6,6 +6,7 @@ test. Cross-layer behavior (real repo + real state machine) lives in
 test_end_to_end_recovery.py.
 """
 
+import asyncio
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,8 @@ from countersign.contracts.workflow_io import (
     SnapshotOutcome,
     VerifyOutcome,
 )
+from countersign.domain.gates import MAX_GENERATIONS
+from countersign.domain.ids import approval_request_id
 from countersign.gateway.evaluator import run_evaluation
 from countersign.gateway.fake_provider import FakeEvaluationProvider
 from countersign.policy.defaults import salary_bands
@@ -60,6 +63,7 @@ def make_activities(
     snapshot_policy_failure: bool = False,
     approval_ttl: timedelta = timedelta(days=7),
     observed_text_chars: int = 1200,
+    round_two_barrier: tuple[asyncio.Event, asyncio.Event] | None = None,
 ) -> list[ActivityFn]:
     def snapshot_record(case_id: str) -> SnapshotRecord:
         return SnapshotRecord(
@@ -103,6 +107,12 @@ def make_activities(
     @activity.defn(name="verify_status")
     async def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
         recorder.hit("verify_status")
+        if round_two_barrier is not None and payload.generation == 2:
+            # Hold round 2 here, after it started and before its approval
+            # exists, so a test can deliver Signals into that window.
+            entered, release = round_two_barrier
+            entered.set()
+            await release.wait()
         return VerifyOutcome(
             verification=VerificationResult(
                 case_id=payload.case_id,
@@ -141,7 +151,7 @@ def make_activities(
     async def create_approval(payload: CaseWorkflowInput) -> ApprovalRequestOutcome:
         recorder.hit("create_approval")
         return ApprovalRequestOutcome(
-            approval_request_id=f"appr-{payload.case_id}-g1",
+            approval_request_id=approval_request_id(payload.case_id, payload.generation),
             expires_at=datetime.now(UTC) + approval_ttl,
         )
 
@@ -306,3 +316,102 @@ async def test_empty_posting_body_stops_before_the_model() -> None:
     assert recorder.calls["mark_needs_evidence"] == 1
     assert "evaluate_case" not in recorder.calls
     assert "create_approval" not in recorder.calls
+
+
+def _signal(approval_id: str, decision: ApprovalDecision, reason: str) -> DecisionSignal:
+    return DecisionSignal(
+        approval_request_id=approval_id,
+        decision=decision,
+        reason=reason,
+        decision_version=1,
+        actor="admin",
+    )
+
+
+async def test_request_evidence_continues_into_the_next_round_and_ignores_late_signals() -> None:
+    """ADR-014: REQUEST_EVIDENCE continues the same workflow id as round 2,
+    which skips snapshot/normalize and re-verifies. Round 2 is held inside
+    its first Activity, after the run started and before its approval
+    exists, and Signals for round 1's request — a duplicate and a late
+    APPROVE — are delivered into exactly that window; none decides round 2."""
+
+    recorder = Recorder()
+    queue = f"test-{uuid.uuid4()}"
+    entered, release = asyncio.Event(), asyncio.Event()
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=make_activities(recorder, round_two_barrier=(entered, release)),
+        ):
+            handle = await start_case(env, queue)
+            first = await wait_for_pending_approval(handle)
+            assert first.approval_request_id is not None
+            assert first.generation == 1
+
+            await handle.signal(
+                JobIntelligenceWorkflow.submit_decision,
+                _signal(first.approval_request_id, ApprovalDecision.REQUEST_EVIDENCE, "note"),
+            )
+            await asyncio.wait_for(entered.wait(), timeout=30)
+            held = await handle.query(JobIntelligenceWorkflow.status)
+            assert held.generation == 2
+            assert held.state == CaseState.NEEDS_MORE_EVIDENCE  # verifying, no approval yet
+            assert held.decided is False
+
+            for late in (
+                _signal(first.approval_request_id, ApprovalDecision.REQUEST_EVIDENCE, "note"),
+                _signal(first.approval_request_id, ApprovalDecision.APPROVE, "late approve"),
+            ):
+                await handle.signal(JobIntelligenceWorkflow.submit_decision, late)
+            still_held = await handle.query(JobIntelligenceWorkflow.status)
+            assert still_held.generation == 2 and still_held.decided is False
+            release.set()
+
+            second = await wait_for_pending_approval(handle, generation=2)
+            assert second.approval_request_id is not None
+            assert second.approval_request_id == approval_request_id(second.case_id, 2)
+            assert second.decided is False
+            assert second.approval_request_id != first.approval_request_id
+
+            await handle.signal(
+                JobIntelligenceWorkflow.submit_decision,
+                _signal(second.approval_request_id, ApprovalDecision.APPROVE, "round two"),
+            )
+            result = await handle.result()
+
+    assert result.final_state == CaseState.APPROVED
+    assert result.decision == ApprovalDecision.APPROVE
+    assert recorder.calls["snapshot_source"] == 1
+    assert recorder.calls["normalize_case"] == 1
+    assert recorder.calls["verify_status"] == 2
+    assert recorder.calls["evaluate_case"] == 2
+    assert recorder.calls["create_approval"] == 2
+    assert recorder.calls["finalize_decision"] == 2
+
+
+async def test_request_evidence_at_the_round_cap_ends_the_case() -> None:
+    recorder = Recorder()
+    queue = f"test-{uuid.uuid4()}"
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=make_activities(recorder),
+        ):
+            handle = await start_case(env, queue, generation=MAX_GENERATIONS)
+            status = await wait_for_pending_approval(handle, generation=MAX_GENERATIONS)
+            assert status.approval_request_id is not None
+            await handle.signal(
+                JobIntelligenceWorkflow.submit_decision,
+                _signal(status.approval_request_id, ApprovalDecision.REQUEST_EVIDENCE, "more"),
+            )
+            result = await handle.result()
+
+    assert result.final_state == CaseState.NEEDS_MORE_EVIDENCE
+    assert result.decision == ApprovalDecision.REQUEST_EVIDENCE
+    assert "snapshot_source" not in recorder.calls  # a later round re-observes via verify
+    assert recorder.calls["verify_status"] == 1
+    assert recorder.calls["finalize_decision"] == 1

@@ -26,6 +26,7 @@ from countersign.capabilities.page_evidence import Observation
 from countersign.capabilities.render import render_url
 from countersign.contracts.enums import (
     ActorType,
+    ApprovalDecision,
     ApprovalRequestStatus,
     CaseState,
     EvidenceKind,
@@ -44,7 +45,8 @@ from countersign.contracts.workflow_io import (
     SnapshotOutcome,
     VerifyOutcome,
 )
-from countersign.domain.gates import allowed_decisions_for
+from countersign.domain import ids
+from countersign.domain.gates import MAX_GENERATIONS, allowed_decisions_for
 from countersign.domain.states import DECISION_TO_STATE
 from countersign.domain.verification import classify_reading
 from countersign.gateway.evaluator import resolve_provider, run_evaluation
@@ -243,8 +245,8 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
         e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
         for e in result.evidence
     )
-    reading_id = f"read-{payload.case_id}-g{payload.generation}"
-    verification_id = f"ver-{payload.case_id}-g{payload.generation}"
+    reading_id = ids.reading_id(payload.case_id, payload.generation)
+    verification_id = ids.verification_id(payload.case_id, payload.generation)
 
     with session_scope() as session:
         first_snapshot = repo.body_snapshot(session, payload.case_id)
@@ -342,6 +344,9 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
         verification = repo.latest_verification(session, payload.case_id)
         case = repo.get_case(session, payload.case_id)
         title = case.title if case is not None else None
+        # Reviewer notes from earlier rounds ride along as human-asserted
+        # context (ADR-014); the record names the decisions it consumed.
+        context = repo.operator_context(session, payload.case_id)
     normalized = normalize_html(body)
 
     # Marks the activity attempt only; the provider-boundary lines live in
@@ -359,6 +364,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             source_authority=snapshot.authority_level,
             bands=salary_bands(),
             profile=load_operator_profile(),
+            operator_context=context,
             generation=payload.generation,
         )
     except (ContractFailure, ProviderRefusal) as exc:
@@ -406,7 +412,7 @@ def create_approval(payload: CaseWorkflowInput) -> ApprovalRequestOutcome:
             session,
             case_id=payload.case_id,
             generation=payload.generation,
-            allowed=allowed_decisions_for(verification),
+            allowed=allowed_decisions_for(verification, generation=payload.generation),
             expires_at=expires_at,
             snapshot_id=snapshot.snapshot_id if snapshot else None,
             verification_id=repo.latest_verification_id(session, payload.case_id),
@@ -459,6 +465,18 @@ def finalize_decision(signal: DecisionSignal) -> None:
             reason=signal.reason,
             workflow_id=_workflow_id(),
         )
+        if (
+            signal.decision == ApprovalDecision.REQUEST_EVIDENCE
+            and request.generation < MAX_GENERATIONS
+        ):
+            # The same rule the workflow applies before continue-as-new,
+            # recorded here so the next round is a stored fact (ADR-014).
+            repo.mark_round_continued(
+                session,
+                case_id=request.case_id,
+                next_generation=request.generation + 1,
+                workflow_id=_workflow_id(),
+            )
 
 
 @activity.defn(name="mark_closed")

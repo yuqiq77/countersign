@@ -99,6 +99,42 @@ async def test_idempotent_replay_restarts_the_workflow(
 
 
 @pytest.mark.usefixtures("db")
+async def test_idempotent_replay_of_a_started_case_starts_nothing(
+    stub_temporal: _StubTemporal,
+) -> None:
+    """Once a case has left DISCOVERED its workflow exists — under this id
+    format or the earlier per-generation one — so a replayed intake returns
+    the case and must not start a second workflow for it."""
+
+    from countersign.contracts.enums import ActorType, CaseState
+
+    async with _client() as client:
+        first = await client.post(
+            "/v1/cases", json={"url": PUBLIC_URL}, headers={"Idempotency-Key": "k1"}
+        )
+    case_id = first.json()["case_id"]
+    with session_scope() as session:
+        repo.transition_case(
+            session,
+            case_id=case_id,
+            new_state=CaseState.SNAPSHOTTED,
+            actor_type=ActorType.SERVICE,
+            actor_id="worker",
+        )
+    async with _client() as client:
+        replay = await client.post(
+            "/v1/cases", json={"url": PUBLIC_URL}, headers={"Idempotency-Key": "k1"}
+        )
+    assert replay.status_code == 202
+    assert replay.json() == {
+        "case_id": case_id,
+        "workflow_id": f"job-case/{case_id}",
+        "state": "SNAPSHOTTED",
+    }
+    assert len(stub_temporal.starts) == 1
+
+
+@pytest.mark.usefixtures("db")
 async def test_key_reuse_with_different_payload_conflicts(
     stub_temporal: _StubTemporal,
 ) -> None:
@@ -120,6 +156,7 @@ def _seed_approval(
     allowed: list[ApprovalDecision],
     status: ApprovalRequestStatus,
     verification: JobStatus | None = None,
+    generation: int = 1,
 ) -> str:
     with session_scope() as session:
         repo.create_case(session, case_id="c1", url=PUBLIC_URL)
@@ -144,7 +181,7 @@ def _seed_approval(
         row = repo.create_approval_request(
             session,
             case_id="c1",
-            generation=1,
+            generation=generation,
             allowed=allowed,
             expires_at=repo.utcnow() + timedelta(days=7),
             verification_id=verification_id,
@@ -396,3 +433,103 @@ async def test_attested_decision_replay_compares_the_attestation(
     assert unattested.status_code == 409
     assert other_note.status_code == 409
     assert stub_temporal.signals == []
+
+
+@pytest.mark.usefixtures("db")
+async def test_request_evidence_is_accepted_below_the_cap_and_refused_at_it(
+    stub_temporal: _StubTemporal,
+) -> None:
+    from countersign.domain.gates import MAX_GENERATIONS
+
+    below = _seed_approval(allowed=_GATED, status=ApprovalRequestStatus.PENDING, generation=1)
+    body = {"decision": "REQUEST_EVIDENCE", "reason": "a note", "decision_version": 1}
+    async with _client() as client:
+        accepted = await client.post(f"/v1/approvals/{below}/decisions", json=body)
+    assert accepted.status_code == 200
+    assert stub_temporal.signals == ["signal"]
+
+    with session_scope() as session:  # the gate at the cap omits REQUEST_EVIDENCE
+        capped = repo.create_approval_request(
+            session,
+            case_id="c1",
+            generation=MAX_GENERATIONS,
+            allowed=[ApprovalDecision.REJECT],
+            expires_at=repo.utcnow() + timedelta(days=7),
+        ).id
+    async with _client() as client:
+        refused = await client.post(f"/v1/approvals/{capped}/decisions", json=body)
+    assert refused.status_code == 400
+    assert stub_temporal.signals == ["signal"]
+
+
+@pytest.mark.usefixtures("db")
+async def test_case_detail_exposes_operator_context_and_in_flight(
+    stub_temporal: _StubTemporal,
+) -> None:
+    from countersign.contracts.enums import ActorType, CaseState
+    from countersign.domain.ids import verification_id
+
+    approval_id = _seed_approval(allowed=_GATED, status=ApprovalRequestStatus.PENDING)
+    with session_scope() as session:
+        for state in (
+            CaseState.SNAPSHOTTED,
+            CaseState.NORMALIZED,
+            CaseState.DEDUPLICATED,
+            CaseState.OFFICIAL_SOURCE_VERIFIED,
+            CaseState.EVALUATED,
+            CaseState.PENDING_APPROVAL,
+        ):
+            repo.transition_case(
+                session,
+                case_id="c1",
+                new_state=state,
+                actor_type=ActorType.SERVICE,
+                actor_id="worker",
+            )
+        repo.record_decision(
+            session,
+            approval_request_id=approval_id,
+            decision=ApprovalDecision.REQUEST_EVIDENCE,
+            reason="a candidate-side note",
+            actor="admin",
+            decision_version=1,
+        )
+        repo.transition_case(
+            session,
+            case_id="c1",
+            new_state=CaseState.NEEDS_MORE_EVIDENCE,
+            actor_type=ActorType.HUMAN,
+            actor_id="admin",
+        )
+    async with _client() as client:
+        legacy = (await client.get("/v1/cases/c1")).json()
+    # Decided before the loop existed: no continued-round record, so final.
+    assert legacy["in_flight"] is False
+    with session_scope() as session:
+        repo.mark_round_continued(session, case_id="c1", next_generation=2)
+    async with _client() as client:
+        during = (await client.get("/v1/cases/c1")).json()
+    assert during["in_flight"] is True
+    assert [c["text"] for c in during["operator_context"]] == ["a candidate-side note"]
+    assert during["approval"]["generation"] == 1
+    assert during["approval"]["max_generations"] >= 2
+
+    with session_scope() as session:
+        repo.record_verification(
+            session,
+            verification_id=verification_id("c1", 2),
+            result=VerificationResult(
+                case_id="c1",
+                status=JobStatus.UNVERIFIED,
+                authority=SourceAuthority.OFFICIAL_ATS,
+                checked_at=repo.utcnow(),
+                http_status=200,
+                final_url=PUBLIC_URL,
+                reason="empty body",
+                apply_markers_found=False,
+                closed_markers_found=False,
+            ),
+        )
+    async with _client() as client:
+        after = (await client.get("/v1/cases/c1")).json()
+    assert after["in_flight"] is False

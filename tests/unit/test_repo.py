@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from countersign.contracts.enums import ActorType, ApprovalDecision, CaseState
 from countersign.persistence import repo
@@ -212,3 +213,135 @@ def test_attested_decision_writes_its_own_audit_event_in_the_same_transaction() 
                 actor="admin",
                 decision_version=1,
             )
+
+
+def _walk_to(session: Session, case_id: str, states: list[CaseState]) -> None:
+    for state in states:
+        repo.transition_case(
+            session,
+            case_id=case_id,
+            new_state=state,
+            actor_type=ActorType.SERVICE,
+            actor_id="worker",
+        )
+
+
+_TO_PENDING = [
+    CaseState.SNAPSHOTTED,
+    CaseState.NORMALIZED,
+    CaseState.DEDUPLICATED,
+    CaseState.OFFICIAL_SOURCE_VERIFIED,
+    CaseState.EVALUATED,
+    CaseState.PENDING_APPROVAL,
+]
+
+
+def test_operator_context_is_the_request_evidence_reasons_in_order() -> None:
+    expires = datetime.now(UTC) + timedelta(days=7)
+    with session_scope() as session:
+        repo.create_case(session, case_id="c1", url="https://example.com/j/1")
+        for generation, decision, reason in (
+            (1, ApprovalDecision.REQUEST_EVIDENCE, "first note"),
+            (2, ApprovalDecision.REQUEST_EVIDENCE, "second note"),
+            (3, ApprovalDecision.REJECT, "not context"),
+        ):
+            row = repo.create_approval_request(
+                session,
+                case_id="c1",
+                generation=generation,
+                allowed=[ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE],
+                expires_at=expires,
+            )
+            repo.record_decision(
+                session,
+                approval_request_id=row.id,
+                decision=decision,
+                reason=reason,
+                actor="admin",
+                decision_version=1,
+            )
+    with session_scope() as session:
+        context = repo.operator_context(session, "c1")
+        assert [c.text for c in context] == ["first note", "second note"]
+        assert [c.decision_id for c in context] == ["dec-appr-c1-g1-v1", "dec-appr-c1-g2-v1"]
+        assert all(c.supplied_at.tzinfo is not None for c in context)
+        assert repo.operator_context(session, "other") == []
+
+
+def test_in_flight_covers_the_re_round_but_not_a_dead_end() -> None:
+    """ADR-014: NEEDS_MORE_EVIDENCE counts as in flight only while the next
+    round is due — decided REQUEST_EVIDENCE below the cap and no verification
+    for the next generation yet."""
+
+    from countersign.contracts.enums import JobStatus, SourceAuthority
+    from countersign.contracts.verification import VerificationResult
+    from countersign.domain.gates import MAX_GENERATIONS
+    from countersign.domain.ids import verification_id
+
+    expires = datetime.now(UTC) + timedelta(days=7)
+    with session_scope() as session:
+        repo.create_case(session, case_id="c1", url="https://example.com/j/1")
+        assert repo.in_flight(session, "c1") is True  # DISCOVERED
+        _walk_to(session, "c1", _TO_PENDING)
+        assert repo.in_flight(session, "c1") is True  # PENDING_APPROVAL
+        row = repo.create_approval_request(
+            session,
+            case_id="c1",
+            generation=1,
+            allowed=[ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE],
+            expires_at=expires,
+        )
+        repo.record_decision(
+            session,
+            approval_request_id=row.id,
+            decision=ApprovalDecision.REQUEST_EVIDENCE,
+            reason="a note",
+            actor="admin",
+            decision_version=1,
+        )
+        _walk_to(session, "c1", [CaseState.NEEDS_MORE_EVIDENCE])
+        # The decision alone is not enough: a case decided under earlier code
+        # ended here and has no continued-round record.
+        assert repo.in_flight(session, "c1") is False
+        repo.mark_round_continued(session, case_id="c1", next_generation=2)
+        repo.mark_round_continued(session, case_id="c1", next_generation=2)  # idempotent
+        assert repo.round_continued(session, "c1", 2) is True
+        assert repo.in_flight(session, "c1") is True  # round 2 is due
+        repo.record_verification(
+            session,
+            verification_id=verification_id("c1", 2),
+            result=VerificationResult(
+                case_id="c1",
+                status=JobStatus.UNVERIFIED,
+                authority=SourceAuthority.OFFICIAL_ATS,
+                checked_at=datetime.now(UTC),
+                http_status=200,
+                final_url="https://example.com/j/1",
+                reason="empty body",
+                apply_markers_found=False,
+                closed_markers_found=False,
+            ),
+        )
+        assert repo.in_flight(session, "c1") is False  # round 2 ran and ended here
+
+    with session_scope() as session:
+        repo.create_case(session, case_id="c2", url="https://example.com/j/2")
+        _walk_to(session, "c2", _TO_PENDING)
+        row = repo.create_approval_request(
+            session,
+            case_id="c2",
+            generation=MAX_GENERATIONS,
+            allowed=[ApprovalDecision.REJECT],
+            expires_at=expires,
+        )
+        repo.record_decision(
+            session,
+            approval_request_id=row.id,
+            decision=ApprovalDecision.REJECT,
+            reason="no",
+            actor="admin",
+            decision_version=1,
+        )
+        _walk_to(session, "c2", [CaseState.REJECTED])
+        assert repo.in_flight(session, "c2") is False
+        assert repo.in_flight(session, "missing") is False

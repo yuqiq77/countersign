@@ -60,6 +60,21 @@ class ApprovalRequestView(ContractModel):
     snapshot_id: str | None
     verification_id: str | None
     evaluation_id: str | None
+    # Evidence-loop round this request belongs to, and the cap (ADR-014).
+    generation: int
+    max_generations: int
+
+
+class OperatorContext(ContractModel):
+    """Context the reviewer supplied with a REQUEST_EVIDENCE decision (ADR-014).
+
+    Human-asserted, case-scoped, and given to later evaluations as such;
+    the decision id is what the evaluation record cites.
+    """
+
+    decision_id: str
+    supplied_at: datetime
+    text: str
 
 
 class CaseDetail(ContractModel):
@@ -75,6 +90,11 @@ class CaseDetail(ContractModel):
     evaluation: EvaluationRecord | None
     gated_decision: EvalDecision | None
     approval: ApprovalRequestView | None
+    operator_context: list[OperatorContext]
+    # Derived from stored records: the workflow may still move this case,
+    # including the evidence-loop re-round that passes through
+    # NEEDS_MORE_EVIDENCE. The client polls while this is true.
+    in_flight: bool
 
 
 class Attestation(JsonBoundaryModel):

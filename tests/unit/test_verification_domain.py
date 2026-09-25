@@ -105,6 +105,20 @@ def test_attestation_opens_the_gate_only_where_nothing_says_closed() -> None:
     assert ApprovalDecision.APPROVE in allowed_decisions_for(_verification(JobStatus.OPEN), signed)
 
 
+def test_request_evidence_is_offered_only_below_the_round_cap() -> None:
+    from countersign.domain.gates import MAX_GENERATIONS
+
+    open_ = _verification(JobStatus.OPEN)
+    for generation in range(1, MAX_GENERATIONS):
+        assert ApprovalDecision.REQUEST_EVIDENCE in allowed_decisions_for(
+            open_, generation=generation
+        )
+    capped = allowed_decisions_for(open_, generation=MAX_GENERATIONS)
+    assert ApprovalDecision.REQUEST_EVIDENCE not in capped
+    assert capped == [ApprovalDecision.APPROVE, ApprovalDecision.REJECT]
+    assert allowed_decisions_for(None, generation=MAX_GENERATIONS) == [ApprovalDecision.REJECT]
+
+
 def test_evidence_table_ranks_closed_and_expiry_over_apply_entries() -> None:
     from datetime import UTC, datetime
 

@@ -79,6 +79,20 @@ TERMINAL_STATES: frozenset[CaseState] = frozenset(
     state for state, targets in ALLOWED_TRANSITIONS.items() if not targets
 )
 
+# States the workflow can still move on its own. "In flight" as the API
+# reports it is this set plus the evidence-loop re-round (ADR-014).
+IN_FLIGHT_STATES: frozenset[CaseState] = frozenset(
+    {
+        CaseState.DISCOVERED,
+        CaseState.SNAPSHOTTED,
+        CaseState.NORMALIZED,
+        CaseState.DEDUPLICATED,
+        CaseState.OFFICIAL_SOURCE_VERIFIED,
+        CaseState.EVALUATED,
+        CaseState.PENDING_APPROVAL,
+    }
+)
+
 # The single source for "which decision moves a case where" — imported by
 # both the workflow and the activity layer (both may import domain/).
 DECISION_TO_STATE: dict[ApprovalDecision, CaseState] = {

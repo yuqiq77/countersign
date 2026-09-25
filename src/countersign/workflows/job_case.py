@@ -14,7 +14,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from countersign.contracts.enums import CaseState, JobStatus
+    from countersign.contracts.enums import ApprovalDecision, CaseState, JobStatus
     from countersign.contracts.workflow_io import (
         ApprovalRequestOutcome,
         CaseStateNote,
@@ -27,6 +27,8 @@ with workflow.unsafe.imports_passed_through():
         SnapshotOutcome,
         VerifyOutcome,
     )
+    from countersign.domain.gates import MAX_GENERATIONS
+    from countersign.domain.ids import approval_request_id
     from countersign.domain.states import DECISION_TO_STATE
 
 _RETRY = RetryPolicy(
@@ -51,11 +53,17 @@ def _error_type(error: ActivityError) -> str | None:
 
 @workflow.defn(name="JobIntelligenceWorkflow")
 class JobIntelligenceWorkflow:
-    """snapshot -> normalize -> verify -> evaluate -> durable approval wait."""
+    """snapshot -> normalize -> verify -> evaluate -> durable approval wait.
+
+    A REQUEST_EVIDENCE decision continues the same workflow id as a new run
+    with the next generation (ADR-014), which re-verifies and re-evaluates
+    with the reviewer's reason as operator context, up to MAX_GENERATIONS.
+    """
 
     def __init__(self) -> None:
         self._state: CaseState = CaseState.DISCOVERED
         self._case_id: str = ""
+        self._generation: int = 1
         self._approval_request_id: str | None = None
         self._decision: DecisionSignal | None = None
 
@@ -76,25 +84,35 @@ class JobIntelligenceWorkflow:
     @workflow.run
     async def run(self, payload: CaseWorkflowInput) -> CaseWorkflowResult:
         self._case_id = payload.case_id
+        self._generation = payload.generation
+        # Known before any Activity: this run's approval request id is
+        # deterministic, so a Signal for another round is dropped from the
+        # first event on, including a late one from the previous round.
+        self._approval_request_id = approval_request_id(payload.case_id, payload.generation)
 
         try:
-            await workflow.execute_activity(
-                "snapshot_source",
-                payload,
-                result_type=SnapshotOutcome,
-                start_to_close_timeout=_ACTIVITY_TIMEOUT,
-                retry_policy=_RETRY,
-            )
-            self._state = CaseState.SNAPSHOTTED
+            if payload.generation == 1:
+                await workflow.execute_activity(
+                    "snapshot_source",
+                    payload,
+                    result_type=SnapshotOutcome,
+                    start_to_close_timeout=_ACTIVITY_TIMEOUT,
+                    retry_policy=_RETRY,
+                )
+                self._state = CaseState.SNAPSHOTTED
 
-            await workflow.execute_activity(
-                "normalize_case",
-                payload,
-                result_type=NormalizeOutcome,
-                start_to_close_timeout=_ACTIVITY_TIMEOUT,
-                retry_policy=_RETRY,
-            )
-            self._state = CaseState.DEDUPLICATED
+                await workflow.execute_activity(
+                    "normalize_case",
+                    payload,
+                    result_type=NormalizeOutcome,
+                    start_to_close_timeout=_ACTIVITY_TIMEOUT,
+                    retry_policy=_RETRY,
+                )
+                self._state = CaseState.DEDUPLICATED
+            else:
+                # A later round re-observes through verification itself; the
+                # intake snapshot and its normalization are not repeated.
+                self._state = CaseState.NEEDS_MORE_EVIDENCE
 
             verify = await workflow.execute_activity(
                 "verify_status",
@@ -206,6 +224,21 @@ class JobIntelligenceWorkflow:
         )
         final_state = DECISION_TO_STATE[decision.decision]
         self._state = final_state
+        if (
+            decision.decision == ApprovalDecision.REQUEST_EVIDENCE
+            and payload.generation < MAX_GENERATIONS
+        ):
+            # The reviewer's reason is now stored as their decision; the next
+            # round reads it back as operator context. Same workflow id, new
+            # run: verify -> evaluate -> approve again.
+            workflow.continue_as_new(
+                CaseWorkflowInput(
+                    case_id=payload.case_id,
+                    url=payload.url,
+                    generation=payload.generation + 1,
+                    contract_version=payload.contract_version,
+                )
+            )
         return CaseWorkflowResult(
             case_id=payload.case_id,
             final_state=final_state,
@@ -214,14 +247,16 @@ class JobIntelligenceWorkflow:
 
     @workflow.signal(name="submit_decision")
     def submit_decision(self, signal: DecisionSignal) -> None:
-        """Record the first matching decision; duplicates are harmless."""
+        """Record the first decision for this round's approval request.
+
+        Duplicates are harmless. A Signal for another approval request —
+        a late one from the previous round after continue-as-new, or any
+        Signal before this run knows its own request id — is dropped.
+        """
 
         if self._decision is not None:
             return
-        if (
-            self._approval_request_id is not None
-            and signal.approval_request_id != self._approval_request_id
-        ):
+        if signal.approval_request_id != self._approval_request_id:
             return
         self._decision = signal
 
@@ -234,4 +269,5 @@ class JobIntelligenceWorkflow:
             state=self._state,
             approval_request_id=self._approval_request_id,
             decided=self._decision is not None,
+            generation=self._generation,
         )

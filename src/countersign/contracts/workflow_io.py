@@ -95,6 +95,7 @@ class CaseWorkflowStatus(ContractModel):
     state: CaseState
     approval_request_id: str | None
     decided: bool
+    generation: int = 1
 
 
 class CaseWorkflowResult(ContractModel):

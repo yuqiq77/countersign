@@ -105,3 +105,6 @@ class EvaluationRecord(ContractModel):
     prompt_version: str
     model_route: str
     usage: ModelUsage
+    # Decision ids of the operator context this evaluation was given
+    # (ADR-014); empty before the evidence loop existed or when none was.
+    operator_context_ids: list[str] = Field(default_factory=lambda: [])

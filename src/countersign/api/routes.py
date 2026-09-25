@@ -2,8 +2,9 @@
 
 Mutations require an Idempotency-Key bound to a payload fingerprint and
 append audit events; long-running work returns 202 and continues in the
-durable workflow. Replays re-issue the (idempotent) workflow start, so a
-case whose first start failed heals on retry instead of orphaning.
+durable workflow. A replay re-issues the (idempotent) workflow start only
+for a case still in DISCOVERED, so an intake whose first start failed
+heals on retry without a second workflow for a case that already ran.
 """
 
 import hashlib
@@ -107,8 +108,12 @@ async def create_case(
             )
             state = CaseState.DISCOVERED
 
-    workflow_id = await _start_case_workflow(case_id, payload.url)
-    return CreateCaseResponse(case_id=case_id, workflow_id=workflow_id, state=state)
+    # Only an intake that never left DISCOVERED may lack its workflow. A case
+    # further along has one, running or completed — under this id format or
+    # the earlier per-generation one — and a replay must not start another.
+    if state == CaseState.DISCOVERED:
+        await _start_case_workflow(case_id, payload.url)
+    return CreateCaseResponse(case_id=case_id, workflow_id=workflow_id_for(case_id), state=state)
 
 
 @router.get("/cases", response_model=list[CaseSummary])
@@ -142,6 +147,8 @@ def get_case(case_id: str) -> CaseDetail:
             evaluation=evaluation,
             gated_decision=gated,
             approval=repo.approval_view(approval) if approval is not None else None,
+            operator_context=repo.operator_context(session, case_id),
+            in_flight=repo.in_flight(session, case_id),
         )
 
 
@@ -201,7 +208,9 @@ async def submit_decision(
                 if request.verification_id is not None
                 else None
             )
-            if payload.decision not in allowed_decisions_for(pinned, payload.attestation):
+            if payload.decision not in allowed_decisions_for(
+                pinned, payload.attestation, generation=request.generation
+            ):
                 raise HTTPException(status_code=400, detail="decision not allowed")
         case_id = request.case_id
 

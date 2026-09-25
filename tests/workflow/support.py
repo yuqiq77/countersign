@@ -31,12 +31,12 @@ async def time_skipping_env() -> WorkflowEnvironment:
 
 
 async def start_case(
-    env: WorkflowEnvironment, queue: str, *, url: str = JOB_URL
+    env: WorkflowEnvironment, queue: str, *, url: str = JOB_URL, generation: int = 1
 ) -> WorkflowHandle[JobIntelligenceWorkflow, CaseWorkflowResult]:
     case_id = str(uuid.uuid4())
     return await env.client.start_workflow(
         JobIntelligenceWorkflow.run,
-        CaseWorkflowInput(case_id=case_id, url=url),
+        CaseWorkflowInput(case_id=case_id, url=url, generation=generation),
         id=workflow_id_for(case_id),
         task_queue=queue,
     )
@@ -44,12 +44,19 @@ async def start_case(
 
 async def wait_for_pending_approval(
     handle: WorkflowHandle[JobIntelligenceWorkflow, CaseWorkflowResult],
+    *,
+    generation: int = 1,
 ) -> CaseWorkflowStatus:
-    """Poll the status query until the workflow reaches PENDING_APPROVAL."""
+    """Poll the status query until the given round reaches PENDING_APPROVAL.
+
+    The query follows continue-as-new to the latest run, so after a
+    REQUEST_EVIDENCE decision the round number is what distinguishes the
+    next approval from the one just decided.
+    """
 
     for _ in range(200):
         status = await handle.query(JobIntelligenceWorkflow.status)
-        if status.state == CaseState.PENDING_APPROVAL:
+        if status.state == CaseState.PENDING_APPROVAL and status.generation == generation:
             return status
         await asyncio.sleep(0.05)
-    raise AssertionError("workflow never reached PENDING_APPROVAL")
+    raise AssertionError(f"workflow never reached PENDING_APPROVAL in round {generation}")

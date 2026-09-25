@@ -11,6 +11,11 @@ from countersign.contracts.verification import VerificationResult
 
 _NEVER_ATTESTABLE = (JobStatus.CLOSED, JobStatus.EXPIRED)
 
+# Evidence-loop rounds per case (ADR-014). At the cap the approval offers no
+# REQUEST_EVIDENCE: three rounds of context is a conversation; more is a
+# profile that should be edited.
+MAX_GENERATIONS = 3
+
 
 def apply_now_permitted(verification: VerificationResult) -> bool:
     """Only a verified official `OPEN` status may be framed as apply-now."""
@@ -21,9 +26,12 @@ def apply_now_permitted(verification: VerificationResult) -> bool:
 def allowed_decisions_for(
     verification: VerificationResult | None,
     attestation: Attestation | None = None,
+    *,
+    generation: int = 1,
 ) -> list[ApprovalDecision]:
     """The lifecycle gate: APPROVE needs a verified official OPEN, or a human
-    attestation on a posting the system could not verify (ADR-013).
+    attestation on a posting the system could not verify (ADR-013);
+    REQUEST_EVIDENCE is offered while evidence-loop rounds remain (ADR-014).
 
     This constrains what the approval request accepts — not merely what the
     UI displays. The stored allowed set on a request is the no-attestation
@@ -42,13 +50,11 @@ def allowed_decisions_for(
             and verification.status not in _NEVER_ATTESTABLE
         )
     )
-    if approve:
-        return [
-            ApprovalDecision.APPROVE,
-            ApprovalDecision.REJECT,
-            ApprovalDecision.REQUEST_EVIDENCE,
-        ]
-    return [ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE]
+    allowed = [ApprovalDecision.APPROVE] if approve else []
+    allowed.append(ApprovalDecision.REJECT)
+    if generation < MAX_GENERATIONS:
+        allowed.append(ApprovalDecision.REQUEST_EVIDENCE)
+    return allowed
 
 
 def gated_decision(evaluation: ModelEvaluation, verification: VerificationResult) -> EvalDecision:

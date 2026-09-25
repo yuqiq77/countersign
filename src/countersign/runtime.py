@@ -9,10 +9,14 @@ TASK_QUEUE = "countersign-main"
 WORKFLOW_NAME = "JobIntelligenceWorkflow"
 
 
-def workflow_id_for(case_id: str, generation: int = 1) -> str:
-    """Stable business workflow ID (v4 §20)."""
+def workflow_id_for(case_id: str) -> str:
+    """One stable workflow id per case (v4 §20).
 
-    return f"job-case/{case_id}/{generation}"
+    Evidence-loop rounds share it through Continue-As-New; generation
+    distinguishes workflow inputs and round-specific artifact identities.
+    """
+
+    return f"job-case/{case_id}"
 
 
 async def connect_client() -> Client:

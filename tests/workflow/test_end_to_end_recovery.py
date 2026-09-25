@@ -38,10 +38,12 @@ from countersign.gateway.fake_provider import FakeEvaluationProvider
 from countersign.persistence import repo
 from countersign.persistence.db import session_scope
 from countersign.persistence.models import (
+    ApprovalRequestRow,
     AuditEventRow,
     EvaluationRunRow,
     HumanDecisionRow,
     SourceSnapshotRow,
+    VerificationRow,
 )
 from countersign.workflows.job_case import JobIntelligenceWorkflow
 
@@ -404,6 +406,91 @@ async def test_attested_approval_of_an_unverified_posting_is_recorded_once(
             )
         )
         assert len(attested) == 1 and attested[0].reason == note
+
+
+@pytest.mark.usefixtures("db", "fake_network")
+async def test_request_evidence_re_evaluates_with_the_reviewers_note() -> None:
+    """ADR-014 end to end: the note becomes operator context for round 2, the
+    round-2 evaluation cites the round-1 decision, every artifact exists once
+    per round, and the case page's in-flight flag ends with the approval."""
+
+    queue = f"e2e-{uuid.uuid4()}"
+    note = "Completed a structured interview-preparation course this year."
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=list(ALL_ACTIVITIES),
+            activity_executor=ThreadPoolExecutor(4),
+        ):
+            handle = await start_case(env, queue)
+            first = await wait_for_pending_approval(handle)
+            assert first.approval_request_id is not None
+            await handle.signal(
+                JobIntelligenceWorkflow.submit_decision,
+                DecisionSignal(
+                    approval_request_id=first.approval_request_id,
+                    decision=ApprovalDecision.REQUEST_EVIDENCE,
+                    reason=note,
+                    decision_version=1,
+                    actor="admin",
+                ),
+            )
+            second = await wait_for_pending_approval(handle, generation=2)
+            assert second.approval_request_id is not None
+            with session_scope() as session:
+                assert repo.in_flight(session, second.case_id) is True
+                context = repo.operator_context(session, second.case_id)
+                assert [c.text for c in context] == [note]
+                evaluation = repo.latest_evaluation(session, second.case_id)
+                assert evaluation is not None
+                assert evaluation.operator_context_ids == [context[0].decision_id]
+                approval = repo.approval_for_case(session, second.case_id)
+                assert approval is not None and approval.generation == 2
+            await handle.signal(
+                JobIntelligenceWorkflow.submit_decision,
+                DecisionSignal(
+                    approval_request_id=second.approval_request_id,
+                    decision=ApprovalDecision.APPROVE,
+                    reason="round two",
+                    decision_version=1,
+                    actor="admin",
+                ),
+            )
+            result = await handle.result()
+
+    assert result.final_state == CaseState.APPROVED
+    with session_scope() as session:
+        case_id = second.case_id
+        assert repo.in_flight(session, case_id) is False
+        counts = {
+            "verifications": session.scalar(
+                select(func.count())
+                .select_from(VerificationRow)
+                .where(VerificationRow.case_id == case_id)
+            ),
+            "evaluations": session.scalar(
+                select(func.count())
+                .select_from(EvaluationRunRow)
+                .where(EvaluationRunRow.case_id == case_id)
+            ),
+            "approvals": session.scalar(
+                select(func.count())
+                .select_from(ApprovalRequestRow)
+                .where(ApprovalRequestRow.case_id == case_id)
+            ),
+            "decisions": session.scalar(select(func.count()).select_from(HumanDecisionRow)),
+        }
+        assert counts == {"verifications": 2, "evaluations": 2, "approvals": 2, "decisions": 2}
+        audit_actions = list(
+            session.scalars(
+                select(AuditEventRow.action).where(AuditEventRow.resource_id == case_id)
+            )
+        )
+        assert audit_actions.count("case.state.official_source_verified") == 2
+        assert audit_actions.count("case.state.needs_more_evidence") == 1
+        assert audit_actions.count("case.round.continued") == 1
 
 
 @pytest.mark.usefixtures("db", "fake_network")

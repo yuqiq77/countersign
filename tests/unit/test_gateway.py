@@ -248,3 +248,62 @@ def test_transport_failure_is_not_repaired_or_quarantined(monkeypatch: pytest.Mo
     with pytest.raises(ProviderUnavailable):
         run(provider)
     assert len(calls) == 1
+
+
+def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() -> None:
+    """ADR-014: reviewer notes are labelled human-asserted, appear after the
+    posting text and never in the cached system prompt, and the record names
+    the decisions it consumed."""
+
+    from datetime import UTC, datetime
+
+    from countersign.contracts.cases import OperatorContext
+    from countersign.gateway.evaluator import build_system_prompt, build_user_prompt
+
+    notes = [
+        OperatorContext(
+            decision_id="dec-appr-case-1-g1-v1",
+            supplied_at=datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
+            text="Completed a structured interview-preparation course this year.",
+        )
+    ]
+    user = build_user_prompt(
+        url="https://example.com/jobs/1",
+        title="Engineer",
+        text="A job posting body.",
+        verification=None,
+        operator_context=notes,
+    )
+    posting_end = user.index("--- END POSTING TEXT ---")
+    block = user.index(
+        "--- OPERATOR-SUPPLIED CONTEXT (human-asserted, not observed on the posting) ---"
+    )
+    assert posting_end < block
+    assert "[2026-09-25] Completed a structured interview-preparation course" in user
+    assert user.endswith("--- END OPERATOR-SUPPLIED CONTEXT ---")
+    assert "OPERATOR-SUPPLIED CONTEXT" not in build_system_prompt()
+    assert "Treat case context as human assertions" in build_system_prompt()
+
+    without = build_user_prompt(
+        url="https://example.com/jobs/1",
+        title="Engineer",
+        text="A job posting body.",
+        verification=None,
+    )
+    assert "OPERATOR-SUPPLIED CONTEXT" not in without
+
+    record = run_evaluation(
+        FakeEvaluationProvider(),
+        case_id="case-1",
+        content_hash="abc123def4567890",
+        url="https://example.com/jobs/1",
+        title="Engineer",
+        text="A job posting body.",
+        verification=None,
+        bands=BANDS,
+        operator_context=notes,
+        generation=2,
+    )
+    assert record.operator_context_ids == ["dec-appr-case-1-g1-v1"]
+    assert record.prompt_version == "evaluator/0.3.0"
+    assert run(FakeEvaluationProvider()).operator_context_ids == []
