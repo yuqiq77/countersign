@@ -542,7 +542,9 @@ async def test_reader_follows_a_company_page_to_its_ats_posting(
                 action=ReaderAction.FOLLOW,
                 why="posting lives on the ATS",
                 href=JOB_URL,
-                reading=PageReading(body_observation=0),
+                reading=PageReading(
+                    body_observation=0, apply_entry=ApplyEntry(kind=ApplyEntryKind.NONE)
+                ),
             ),
             PageStep(
                 action=ReaderAction.DONE,

@@ -4,9 +4,15 @@ import hashlib
 from typing import cast
 
 from countersign.contracts.base import ContractModel
-from countersign.contracts.enums import EvalDecision, JobStatus, ReaderAction, SeniorityFit
+from countersign.contracts.enums import (
+    ApplyEntryKind,
+    EvalDecision,
+    JobStatus,
+    ReaderAction,
+    SeniorityFit,
+)
 from countersign.contracts.evaluation import ModelEvaluation
-from countersign.contracts.page_reading import PageReading, PageStep
+from countersign.contracts.page_reading import ApplyEntry, PageReading, PageStep
 from countersign.gateway.provider import ContractFailure, ParsedResponse, ProviderResponse
 
 
@@ -53,7 +59,9 @@ class FakeEvaluationProvider:
                 else PageStep(
                     action=ReaderAction.DONE,
                     why="fake: no scripted assessment",
-                    reading=PageReading(body_observation=0),
+                    reading=PageReading(
+                        body_observation=0, apply_entry=ApplyEntry(kind=ApplyEntryKind.NONE)
+                    ),
                 )
             )
         else:

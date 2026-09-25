@@ -38,7 +38,7 @@ from countersign.gateway.provider import (
     StructuredProvider,
 )
 
-READER_PROMPT_VERSION = "page-reader/0.2.0"
+READER_PROMPT_VERSION = "page-reader/0.3.0"
 _log = logging.getLogger(__name__)
 
 FetchFn = Callable[[str, float], FetchResult]
@@ -52,10 +52,12 @@ order up to a fixed cap; controls_truncated: true means the list was cut, so \
 an entry missing from it is not evidence of absence.
 
 Every step includes a reading: body_observation identifies the posting body; \
-apply_entry identifies an actual way to apply for this job; evidence lists \
-closed notices or validThrough dates. An empty reading is valid. Contact or \
-sharing links, saved jobs, talent pools, and unrelated vacancies are not \
-application entries for this job. Interpret their purpose in context.
+apply_entry is required, with kind NONE when the observed pages show no way \
+to apply for this job and otherwise its kind, observation, exact label and \
+paired href; evidence lists closed notices or validThrough dates. A reading \
+with kind NONE and no evidence is valid. Contact or sharing links, saved \
+jobs, talent pools, and unrelated vacancies are not application entries for \
+this job. Interpret their purpose in context.
 
 Cite the observation and exact text for each claim. For controls, copy the \
 whole label and its paired href (null for a button without a target). Code \
@@ -102,6 +104,7 @@ class ReaderResult:
     usage: ModelUsage | None
     prompt_version: str = READER_PROMPT_VERSION
     model_calls: int = 0
+    notes: str = ""
 
 
 @dataclass
@@ -260,7 +263,7 @@ def _verify_reading(
         if 0 <= reading.body_observation < count
         else _richest(observations)
     )
-    entry = reading.apply_entry
+    entry = reading.apply_entry if reading.apply_entry.kind != ApplyEntryKind.NONE else None
     if entry is not None:
         proposed = entry
         bound, why = _bind(
@@ -424,7 +427,9 @@ def read_page(
             break
         if answer.action == ReaderAction.DONE:
             reading = answer.reading
-            steps.append(StepLog(step=step, action=answer.action, outcome="reading proposed"))
+            steps.append(
+                StepLog(step=step, action=answer.action, outcome="reading proposed", why=answer.why)
+            )
             stop = ReaderStop.DONE
             break
         href = answer.href or ""
@@ -451,7 +456,11 @@ def read_page(
         except TimeoutError:
             stop = ReaderStop.WALL_CLOCK
             outcome = "wall-clock budget exhausted"
-        steps.append(StepLog(step=step, action=answer.action, href=answer.href, outcome=outcome))
+        steps.append(
+            StepLog(
+                step=step, action=answer.action, href=answer.href, outcome=outcome, why=answer.why
+            )
+        )
         if time.monotonic() >= deadline:
             stop = ReaderStop.WALL_CLOCK
             break
@@ -490,4 +499,5 @@ def read_page(
         stop_reason=stop,
         usage=usage.to_contract(),
         model_calls=usage.calls,
+        notes=reading.notes if reading is not None else "",
     )

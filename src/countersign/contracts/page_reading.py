@@ -8,6 +8,7 @@ citation check, which were rejected, and why the reading stopped.
 """
 
 from datetime import datetime
+from typing import Any, cast
 
 from pydantic import Field, model_validator
 
@@ -72,19 +73,44 @@ class PageEvidence(ContractModel):
 
 
 class ApplyEntry(ContractModel):
-    """Where and how one applies, bound to the observation that shows it."""
+    """Where and how one applies, bound to the observation that shows it.
+
+    Always present on a reading, with kind NONE when the observed pages
+    show no entry. It used to be `ApplyEntry | None`; under constrained
+    decoding the null branch was the path of least resistance, and live
+    models across routes narrated a working Apply control in `notes` while
+    leaving the field null. Making the choice explicit fixed that on the
+    same page (replay of 2026-09-22). NONE carries no citation; code maps
+    it to "no entry" after verification and never persists it.
+    """
 
     kind: ApplyEntryKind
-    cited_text: str = Field(min_length=1)
-    observation: int
+    observation: int = -1
+    cited_text: str = ""
     href: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _none_carries_nothing(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            kind = cast(dict[str, Any], data).get("kind")
+            if kind == ApplyEntryKind.NONE or kind == "NONE":
+                normalized: dict[str, Any] = {"kind": ApplyEntryKind.NONE}
+                return normalized
+        return cast(Any, data)
+
+    @model_validator(mode="after")
+    def _cites_when_present(self) -> "ApplyEntry":
+        if self.kind != ApplyEntryKind.NONE and (self.observation < 0 or not self.cited_text):
+            raise ValueError("an apply entry cites an observation and its exact text")
+        return self
 
 
 class PageReading(ContractModel):
     """The model's proposed reading; every claim is verified by code before use."""
 
     body_observation: int
-    apply_entry: ApplyEntry | None = None
+    apply_entry: ApplyEntry
     evidence: list[PageEvidence] = Field(default_factory=lambda: [])
     notes: str = ""
 
@@ -121,12 +147,17 @@ class ObservationRef(ContractModel):
 
 
 class StepLog(ContractModel):
-    """One executed step, for the audit trail."""
+    """One executed step, for the audit trail.
+
+    `why` is the model's own stated reason for the step; empty for
+    code-initiated steps and for records written before it was kept.
+    """
 
     step: int
     action: ReaderAction
     href: str | None = None
     outcome: str
+    why: str = ""
 
 
 class PageReadingRecord(ContractModel):
@@ -145,3 +176,6 @@ class PageReadingRecord(ContractModel):
     prompt_version: str
     usage: ModelUsage | None
     read_at: datetime
+    # The model's free-text notes on the final reading: assessment, not
+    # evidence, kept so an empty reading can be audited without a replay.
+    notes: str = ""

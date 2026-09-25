@@ -57,7 +57,8 @@ RENDERED_HTML = (
 )
 
 
-_PROVISIONAL = PageReading(body_observation=0)
+_NONE = ApplyEntry(kind=ApplyEntryKind.NONE)
+_PROVISIONAL = PageReading(body_observation=0, apply_entry=_NONE)
 
 
 def _result(url: str, body: bytes, status: int = 200) -> FetchResult:
@@ -291,7 +292,7 @@ def test_follow_fetch_failures_are_step_outcomes_not_errors() -> None:
 
     steps = [
         PageStep(action=ReaderAction.FOLLOW, why="listed", href=ATS_URL, reading=_PROVISIONAL),
-        PageStep(action=ReaderAction.DONE, why="give up", reading=PageReading(body_observation=0)),
+        PageStep(action=ReaderAction.DONE, why="give up", reading=_PROVISIONAL),
     ]
     result = _run(FakeEvaluationProvider(page_steps=steps), fetch=fetch)
     assert result.steps[0].outcome.startswith("follow failed:")
@@ -299,8 +300,6 @@ def test_follow_fetch_failures_are_step_outcomes_not_errors() -> None:
 
 
 def test_step_contract_requires_the_action_payload() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="FOLLOW requires an href"):
         PageStep(action=ReaderAction.FOLLOW, why="no href", reading=_PROVISIONAL)
     with pytest.raises(ValueError):  # reading is required on every step
@@ -308,10 +307,47 @@ def test_step_contract_requires_the_action_payload() -> None:
     PageStep(action=ReaderAction.RENDER, why="shell", reading=_PROVISIONAL)
 
 
+def test_apply_entry_is_a_required_explicit_choice() -> None:
+    """The live failure mode: an optional entry object was left null while the
+    model narrated the entry in notes. The reading now has to say NONE."""
+
+    with pytest.raises(ValueError):  # no default: the model must choose
+        PageReading.model_validate({"body_observation": 0})
+    none = ApplyEntry.model_validate(
+        {"kind": "NONE", "observation": 0, "cited_text": "Apply", "href": "https://x.example"}
+    )
+    assert (none.observation, none.cited_text, none.href) == (-1, "", None)
+    with pytest.raises(ValueError, match="cites an observation"):
+        ApplyEntry(kind=ApplyEntryKind.APPLY_CONTROL)
+    with pytest.raises(ValueError, match="cites an observation"):
+        ApplyEntry(kind=ApplyEntryKind.APPLY_CONTROL, observation=0)
+    ApplyEntry(kind=ApplyEntryKind.APPLY_CONTROL, observation=0, cited_text="Apply")
+
+
+def test_model_reasons_and_notes_are_kept_for_the_audit_trail() -> None:
+    steps = [
+        PageStep(
+            action=ReaderAction.FOLLOW,
+            why="board links the ATS",
+            href=ATS_URL,
+            reading=_PROVISIONAL,
+        ),
+        PageStep(
+            action=ReaderAction.DONE,
+            why="nothing to cite",
+            reading=PageReading(body_observation=1, apply_entry=_NONE, notes="form needs a login"),
+        ),
+    ]
+    result = _run(FakeEvaluationProvider(page_steps=steps), fetch=_pages(**{ATS_URL: ATS_HTML}))
+    assert [s.why for s in result.steps] == ["board links the ATS", "nothing to cite"]
+    assert result.notes == "form needs a login"
+    assert result.apply_entry is None  # NONE never survives verification as an entry
+
+
 def test_usage_accumulates_across_steps() -> None:
     steps = [
         PageStep(action=ReaderAction.FOLLOW, why="listed", href=ATS_URL, reading=_PROVISIONAL),
-        PageStep(action=ReaderAction.DONE, why="done", reading=PageReading(body_observation=0)),
+        PageStep(action=ReaderAction.DONE, why="done", reading=_PROVISIONAL),
     ]
     result = _run(FakeEvaluationProvider(page_steps=steps), fetch=_pages(**{ATS_URL: ATS_HTML}))
     assert result.model_calls == 2

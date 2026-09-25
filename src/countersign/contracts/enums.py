@@ -14,8 +14,9 @@ class JobStatus(StrEnum):
 
 
 class ApplyEntryKind(StrEnum):
-    """How the reader identified an application entry."""
+    """How the reader identified an application entry; NONE when it found none."""
 
+    NONE = "NONE"
     JSON_LD_DIRECT_APPLY = "JSON_LD_DIRECT_APPLY"
     ATS_LINK = "ATS_LINK"
     APPLY_CONTROL = "APPLY_CONTROL"

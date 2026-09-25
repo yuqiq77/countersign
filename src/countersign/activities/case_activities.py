@@ -279,6 +279,7 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             prompt_version=result.prompt_version,
             usage=result.usage,
             read_at=repo.utcnow(),
+            notes=result.notes,
         )
         repo.record_page_reading(session, reading)
 
