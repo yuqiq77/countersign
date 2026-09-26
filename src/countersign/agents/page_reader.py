@@ -31,6 +31,7 @@ from countersign.contracts.page_reading import (
     PageEvidence,
     PageReading,
     PageStep,
+    RejectedClaim,
     StepLog,
 )
 from countersign.gateway.provider import (
@@ -39,7 +40,7 @@ from countersign.gateway.provider import (
     StructuredProvider,
 )
 
-READER_PROMPT_VERSION = "page-reader/0.4.0"
+READER_PROMPT_VERSION = "page-reader/0.5.0"
 _log = logging.getLogger(__name__)
 
 FetchFn = Callable[[str, float], FetchResult]
@@ -70,7 +71,11 @@ actual JSON-LD date. TEXT_MARKER is for explicit application instructions \
 in the posting text, with no invented href.
 
 Actions:
-- DONE when you have enough evidence, or no useful allowed action remains.
+- DONE when you have enough evidence, or no useful allowed action remains. \
+A DONE step in steps_so_far whose outcome lists rejected claims means code \
+could not find those citations as given: cite each again exactly as the \
+dossier shows it, or leave it out. Repeating a rejected citation unchanged \
+does not establish it.
 - FOLLOW only a listed http(s) href that leads to this same job's posting \
 or application page. Prefer following the application link from a board \
 to the official source; a board's button cannot establish official status.
@@ -93,6 +98,9 @@ class ReaderConfig:
     # keeps its own three-minute limit above this budget plus the first fetch.
     wall_clock_seconds: float = 120.0
     max_repairs: int = 1
+    # After a DONE whose reading has rejected claims, ask once more with the
+    # rejections in the step log, while the step budget allows.
+    citation_repairs: int = 1
 
 
 @dataclass
@@ -101,7 +109,7 @@ class ReaderResult:
     body_observation: int
     apply_entry: ApplyEntry | None
     evidence: list[PageEvidence]
-    rejected_claims: list[str]
+    rejected_claims: list[RejectedClaim]
     steps: list[StepLog]
     stop_reason: ReaderStop
     usage: ModelUsage | None
@@ -159,8 +167,9 @@ def build_user_prompt(
 _MIN_CITATION_CHARS = 3
 # The one structured pair a reader may cite as an entry, tolerant of JSON
 # quoting and spacing ("directApply": true / directApply: true / directApply
-# = true) but not of a different key or value on the same line.
-_DIRECT_APPLY_PAIR = re.compile(r"""["']?\bdirectapply["']?\s*[:=]\s*["']?true\b["']?""")
+# = true) and of the underscore spelling, but not of a different key or
+# value on the same line.
+_DIRECT_APPLY_PAIR = re.compile(r"""["']?\bdirect_?apply["']?\s*[:=]\s*["']?true\b["']?""")
 
 
 def _normalize(text: str) -> str:
@@ -253,7 +262,7 @@ def _bind(
     superseded it when the claim is still shown there; otherwise nowhere."""
 
     if not 0 <= index < len(observations) or not matches(observations[index]):
-        return None, f"or its paired target not found in observation {index}"
+        return None, f"not found in observation {index} as cited, with its paired target"
     current = governing[index]
     if current == index or matches(observations[current]):
         return current, ""
@@ -265,8 +274,8 @@ def _bind(
 
 def _verify_reading(
     reading: PageReading, observations: list[Observation]
-) -> tuple[int, ApplyEntry | None, list[PageEvidence], list[str]]:
-    rejected: list[str] = []
+) -> tuple[int, ApplyEntry | None, list[PageEvidence], list[RejectedClaim]]:
+    rejected: list[RejectedClaim] = []
     count = len(observations)
     governing = _governing(observations)
     body = (
@@ -281,7 +290,16 @@ def _verify_reading(
             entry.observation, observations, governing, lambda o: _entry_matches(o, proposed)
         )
         if bound is None:
-            rejected.append(f"apply_entry: {entry.cited_text!r} {why}")
+            rejected.append(
+                RejectedClaim(
+                    part="apply_entry",
+                    kind=entry.kind.value,
+                    cited_text=entry.cited_text,
+                    observation=entry.observation,
+                    href=entry.href,
+                    reason=why,
+                )
+            )
             entry = None
         elif bound != entry.observation:
             entry = entry.model_copy(update={"observation": bound})
@@ -291,7 +309,16 @@ def _verify_reading(
             claim.observation, observations, governing, lambda o, c=claim: _evidence_matches(o, c)
         )
         if bound is None:
-            rejected.append(f"{claim.kind.value}: {claim.cited_text!r} {why}")
+            rejected.append(
+                RejectedClaim(
+                    part="evidence",
+                    kind=claim.kind.value,
+                    cited_text=claim.cited_text,
+                    observation=claim.observation,
+                    href=claim.href,
+                    reason=why,
+                )
+            )
         elif bound != claim.observation:
             evidence.append(claim.model_copy(update={"observation": bound}))
         else:
@@ -301,6 +328,15 @@ def _verify_reading(
 
 def _richest(observations: list[Observation]) -> int:
     return max(range(len(observations)), key=lambda i: len(observations[i].text))
+
+
+def _proposed(rejected: list[RejectedClaim]) -> str:
+    if not rejected:
+        return "reading proposed"
+    noun = "claim" if len(rejected) == 1 else "claims"
+    return f"reading proposed; {len(rejected)} {noun} rejected: " + "; ".join(
+        r.describe() for r in rejected
+    )
 
 
 def _remaining(deadline: float) -> float:
@@ -395,6 +431,7 @@ def read_page(
     reading: PageReading | None = None
     stop = ReaderStop.STEP_BUDGET
     follows = 0
+    citation_repairs = 0
     rendered_urls: set[str] = set()
 
     def render_current() -> str:
@@ -437,10 +474,26 @@ def read_page(
             )
             break
         if answer.action == ReaderAction.DONE:
+            # The reading stands from here on; a failed later step does not
+            # discard it. Its verification is the step's recorded outcome.
             reading = answer.reading
+            _, _, _, rejected_now = _verify_reading(reading, observations)
             steps.append(
-                StepLog(step=step, action=answer.action, outcome="reading proposed", why=answer.why)
+                StepLog(
+                    step=step, action=answer.action, outcome=_proposed(rejected_now), why=answer.why
+                )
             )
+            if (
+                rejected_now
+                and citation_repairs < cfg.citation_repairs
+                and step < cfg.max_steps
+                and time.monotonic() < deadline
+            ):
+                # Ask once more with the rejections in view: the model can
+                # re-cite from the dossier or drop the claim. Code never
+                # repairs a citation on the model's behalf.
+                citation_repairs += 1
+                continue
             stop = ReaderStop.DONE
             break
         href = answer.href or ""

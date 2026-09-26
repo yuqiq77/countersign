@@ -59,6 +59,9 @@ RENDERED_HTML = (
 
 _NONE = ApplyEntry(kind=ApplyEntryKind.NONE)
 _PROVISIONAL = PageReading(body_observation=0, apply_entry=_NONE)
+# Citation-rule tests script one DONE and read its rejections directly; the
+# repair step, which would ask the fake once more, is covered on its own.
+_STRICT = ReaderConfig(citation_repairs=0)
 
 
 def _result(url: str, body: bytes, status: int = 200) -> FetchResult:
@@ -171,11 +174,16 @@ def test_unverifiable_claims_are_rejected_not_believed() -> None:
             ),
         )
     ]
-    result = _run(FakeEvaluationProvider(page_steps=steps))
+    result = _run(FakeEvaluationProvider(page_steps=steps), config=_STRICT)
     assert result.apply_entry is None
     assert result.evidence == []
     assert len(result.rejected_claims) == 2
-    assert all("not found in observation 0" in r for r in result.rejected_claims)
+    assert all("not found in observation 0" in r.reason for r in result.rejected_claims)
+    assert [(r.part, r.kind) for r in result.rejected_claims] == [
+        ("apply_entry", "APPLY_CONTROL"),
+        ("evidence", "CLOSED_NOTICE"),
+    ]
+    assert result.steps[-1].outcome.startswith("reading proposed; 2 claims rejected: ")
 
 
 def test_render_unavailable_is_reported_and_budget_ends_the_reading() -> None:
@@ -394,10 +402,12 @@ def test_real_quote_does_not_validate_an_invented_target() -> None:
     result = _run(
         FakeEvaluationProvider(
             page_steps=[PageStep(action=ReaderAction.DONE, why="done", reading=reading)]
-        )
+        ),
+        config=_STRICT,
     )
     assert result.apply_entry is None
     assert len(result.rejected_claims) == 1
+    assert result.rejected_claims[0].href == "https://invented.example/apply"
 
 
 def test_render_after_follow_uses_current_page_and_real_response_metadata() -> None:
@@ -517,6 +527,7 @@ def test_claim_cited_on_a_superseded_observation_rebinds_or_is_rejected() -> Non
             first_url=ATS_URL,
             first_html=static,
             render=render,
+            config=_STRICT,
         )
 
     result = run(kept)
@@ -527,7 +538,7 @@ def test_claim_cited_on_a_superseded_observation_rebinds_or_is_rejected() -> Non
     result = run(gone)
     assert result.apply_entry is None and result.evidence == []
     assert len(result.rejected_claims) == 2
-    assert all("observation 1 superseded" in r for r in result.rejected_claims)
+    assert all("observation 1 superseded" in r.reason for r in result.rejected_claims)
 
 
 def test_text_marker_needs_a_real_span_not_a_letter() -> None:
@@ -547,6 +558,7 @@ def test_text_marker_needs_a_real_span_not_a_letter() -> None:
             ),
             first_url=ATS_URL,
             first_html=ATS_HTML,
+            config=_STRICT,
         )
         got = result.apply_entry.cited_text if result.apply_entry else None
         assert got == expected, cited
@@ -600,6 +612,7 @@ def test_jsonld_claim_must_name_the_actual_field_not_an_unrelated_date() -> None
             ]
         ),
         first_html=html,
+        config=_STRICT,
     )
     assert result.apply_entry is None
     assert len(result.rejected_claims) == 2
@@ -686,7 +699,10 @@ def _jsonld_page(fields: str) -> bytes:
         ('"directApply": true', '"directApply": true', None, True),
         ('"directApply": true', "directApply = True", None, True),
         ('"directApply": true', "  directApply :  true ,", None, True),
+        ('"directApply": true', "direct_apply: true", None, True),  # field-name spelling
+        ('"directApply": true', '"direct_apply": true', None, True),
         ('"directApply": true', "notdirectApply: true", None, False),
+        ('"directApply": true', "direct__apply: true", None, False),
         ('"directApply": true', "directApply: trueish", None, False),
         (
             '"directApply": true',
@@ -724,6 +740,7 @@ def test_direct_apply_citation_is_checked_against_the_fact(
         ),
         first_url=ATS_URL,
         first_html=_jsonld_page(fields),
+        config=_STRICT,
     )
     assert (result.apply_entry == entry) is accepted
     assert (result.rejected_claims == []) is accepted
@@ -765,6 +782,7 @@ def test_valid_through_citation_must_contain_the_actual_value(
         ),
         first_url=ATS_URL,
         first_html=_jsonld_page(fields),
+        config=_STRICT,
     )
     if accepted:
         assert result.rejected_claims == []
@@ -773,3 +791,139 @@ def test_valid_through_citation_must_contain_the_actual_value(
     else:
         assert len(result.rejected_claims) == 1
         assert claim not in result.evidence
+
+
+# --- citation repair (ADR-012 amendment) ---------------------------------
+
+_MISQUOTED = PageReading(
+    body_observation=0,
+    apply_entry=ApplyEntry(
+        kind=ApplyEntryKind.APPLY_CONTROL,
+        cited_text="Apply",  # the label is "Apply for this Job"
+        observation=0,
+        href="https://boards.greenhouse.io/acme/jobs/1/apply",
+    ),
+)
+_RECITED = PageReading(
+    body_observation=0,
+    apply_entry=ApplyEntry(
+        kind=ApplyEntryKind.APPLY_CONTROL,
+        cited_text="Apply for this Job",
+        observation=0,
+        href="https://boards.greenhouse.io/acme/jobs/1/apply",
+    ),
+)
+
+
+def _done(reading: PageReading, why: str = "done") -> PageStep:
+    return PageStep(action=ReaderAction.DONE, why=why, reading=reading)
+
+
+def test_rejected_reading_is_asked_once_more_with_the_rejections_in_view() -> None:
+    provider = FakeEvaluationProvider(page_steps=[_done(_MISQUOTED, "first"), _done(_RECITED)])
+    seen: list[str] = []
+    original = provider.parse
+
+    def recording[T: ContractModel](
+        *, system: str, user: str, output_type: type[T], timeout_seconds: float | None = None
+    ) -> ParsedResponse[T]:
+        seen.append(user)
+        return original(
+            system=system, user=user, output_type=output_type, timeout_seconds=timeout_seconds
+        )
+
+    provider.parse = recording  # type: ignore[method-assign]
+    result = _run(provider, first_url=ATS_URL, first_html=ATS_HTML)
+    assert provider.calls == 2
+    assert result.stop_reason == ReaderStop.DONE
+    assert result.apply_entry == _RECITED.apply_entry
+    assert result.rejected_claims == []
+    assert [(s.step, s.action) for s in result.steps] == [
+        (1, ReaderAction.DONE),
+        (2, ReaderAction.DONE),
+    ]
+    assert result.steps[0].outcome.startswith("reading proposed; 1 claim rejected: ")
+    assert "apply_entry APPLY_CONTROL 'Apply'" in result.steps[0].outcome
+    assert result.steps[0].why == "first"
+    assert result.steps[1].outcome == "reading proposed"
+    # The second ask carries the first step, rejections included.
+    assert "1 claim rejected" in seen[1] and "1 claim rejected" not in seen[0]
+
+
+def test_citation_repair_happens_once_and_keeps_the_final_rejections() -> None:
+    provider = FakeEvaluationProvider(page_steps=[_done(_MISQUOTED)] * 3)
+    result = _run(provider, first_url=ATS_URL, first_html=ATS_HTML)
+    assert provider.calls == 2
+    assert result.stop_reason == ReaderStop.DONE
+    assert result.apply_entry is None
+    assert [r.cited_text for r in result.rejected_claims] == ["Apply"]
+    assert [s.step for s in result.steps] == [1, 2]
+    assert all("1 claim rejected" in s.outcome for s in result.steps)
+
+
+def test_citation_repair_needs_a_step_left_in_the_budget() -> None:
+    provider = FakeEvaluationProvider(page_steps=[_done(_MISQUOTED), _done(_RECITED)])
+    result = _run(
+        provider, first_url=ATS_URL, first_html=ATS_HTML, config=ReaderConfig(max_steps=1)
+    )
+    assert provider.calls == 1
+    assert result.stop_reason == ReaderStop.DONE
+    assert result.apply_entry is None
+    assert len(result.rejected_claims) == 1
+
+
+def test_failed_repair_step_keeps_the_reading_already_proposed() -> None:
+    """The first DONE is a completed reading; a model failure on the extra ask
+    is recorded as a step and does not discard what verified."""
+
+    from countersign.gateway.provider import ContractFailure
+
+    mixed = PageReading(
+        body_observation=0,
+        apply_entry=_RECITED.apply_entry,
+        evidence=[
+            PageEvidence(kind=EvidenceKind.CLOSED_NOTICE, cited_text="filled", observation=0)
+        ],
+    )
+    provider = FakeEvaluationProvider(page_steps=[_done(mixed)])
+    original = provider.parse
+
+    def failing_second[T: ContractModel](
+        *, system: str, user: str, output_type: type[T], timeout_seconds: float | None = None
+    ) -> ParsedResponse[T]:
+        if provider.calls:
+            provider.calls += 1
+            raise ContractFailure("fake: no contract-valid output")
+        return original(
+            system=system, user=user, output_type=output_type, timeout_seconds=timeout_seconds
+        )
+
+    provider.parse = failing_second  # type: ignore[method-assign]
+    result = _run(
+        provider,
+        first_url=ATS_URL,
+        first_html=ATS_HTML,
+        config=ReaderConfig(max_repairs=0),
+    )
+    assert result.stop_reason == ReaderStop.MODEL_FAILURE
+    assert result.apply_entry == _RECITED.apply_entry
+    assert result.evidence == []
+    assert [(r.part, r.kind) for r in result.rejected_claims] == [("evidence", "CLOSED_NOTICE")]
+    assert [s.action for s in result.steps] == [ReaderAction.DONE, ReaderAction.DONE]
+    assert result.steps[1].outcome.startswith("MODEL_FAILURE")
+
+
+def test_dossier_shows_jsonld_under_the_source_names() -> None:
+    from countersign.agents.page_reader import build_user_prompt
+
+    obs = observe(
+        index=0,
+        source_url=ATS_URL,
+        how=ObservationHow.STATIC,
+        authority=SourceAuthority.OFFICIAL_ATS,
+        http_status=200,
+        body=_jsonld_page('"directApply": true, "validThrough": "2030-01-31"'),
+    )
+    prompt = build_user_prompt([obs.dossier()], [], ReaderConfig())
+    assert '"directApply": true' in prompt and '"validThrough": "2030-01-31"' in prompt
+    assert "direct_apply" not in prompt and "valid_through" not in prompt

@@ -97,7 +97,7 @@ def replay(
         "steps": [s.model_dump(mode="json") for s in result.steps],
         "apply_entry": result.apply_entry.model_dump(mode="json") if result.apply_entry else None,
         "evidence": [e.model_dump(mode="json") for e in result.evidence],
-        "rejected_claims": result.rejected_claims,
+        "rejected_claims": [r.model_dump(mode="json") for r in result.rejected_claims],
         "notes": result.notes,
         "stop_reason": result.stop_reason.value,
         "prompt_version": result.prompt_version,

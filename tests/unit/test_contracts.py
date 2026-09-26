@@ -100,3 +100,41 @@ def test_attestation_must_state_observed_open_and_only_accompanies_approve() -> 
         }
     )
     assert accepted.attestation is not None and accepted.attestation.note == "form loaded"
+
+
+def test_page_readings_stored_with_string_rejections_remain_readable() -> None:
+    from countersign.contracts.page_reading import PageReadingRecord, RejectedClaim
+
+    record = PageReadingRecord.model_validate(
+        {
+            "reading_id": "read-case-1-g1",
+            "case_id": "case-1",
+            "url": "https://jobs.lever.co/example/1",
+            "observations": [],
+            "body_observation": 0,
+            "apply_entry": None,
+            "evidence": [],
+            "rejected_claims": [
+                "apply_entry: 'Apply' or its paired target not found in observation 0"
+            ],
+            "steps": [],
+            "stop_reason": "DONE",
+            "prompt_version": "page-reader/0.4.0",
+            "usage": None,
+            "read_at": "2026-09-26T12:00:00Z",
+        },
+        strict=False,
+    )
+    (claim,) = record.rejected_claims
+    assert claim.part == "" and claim.observation == -1
+    assert claim.describe() == claim.reason
+    assert claim.reason.startswith("apply_entry: 'Apply'")
+    structured = RejectedClaim(
+        part="evidence",
+        kind="CLOSED_NOTICE",
+        cited_text="filled",
+        observation=1,
+        href=None,
+        reason="not found",
+    )
+    assert structured.describe() == "evidence CLOSED_NOTICE 'filled' (observation 1): not found"

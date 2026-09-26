@@ -10,7 +10,7 @@ citation check, which were rejected, and why the reading stopped.
 from datetime import datetime
 from typing import Any, cast
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from countersign.contracts.base import ContractModel
 from countersign.contracts.enums import (
@@ -32,13 +32,21 @@ class PageControl(ContractModel):
 
 
 class JsonLdSummary(ContractModel):
-    """The status-relevant fields of a JSON-LD `JobPosting`, when present."""
+    """The status-relevant fields of a JSON-LD `JobPosting`, when present.
+
+    Serialized under the source's own names (`directApply`, `validThrough`,
+    `datePosted`), so the dossier shows the pair the rules ask the model to
+    cite. A live model quoted `direct_apply: true` from a dossier that used
+    the field names and was rejected for it.
+    """
+
+    model_config = ConfigDict(serialize_by_alias=True)
 
     title: str | None = None
     organization: str | None = None
-    date_posted: str | None = None
-    valid_through: str | None = None
-    direct_apply: bool | None = None
+    date_posted: str | None = Field(default=None, serialization_alias="datePosted")
+    valid_through: str | None = Field(default=None, serialization_alias="validThrough")
+    direct_apply: bool | None = Field(default=None, serialization_alias="directApply")
 
 
 class PageDossier(ContractModel):
@@ -153,7 +161,9 @@ class StepLog(ContractModel):
     """One executed step, for the audit trail.
 
     `why` is the model's own stated reason for the step; empty for
-    code-initiated steps and for records written before it was kept.
+    code-initiated steps and for records written before it was kept. A
+    DONE step's outcome states how its reading verified, including the
+    claims code rejected, so the model sees them when asked once more.
     """
 
     step: int
@@ -161,6 +171,39 @@ class StepLog(ContractModel):
     href: str | None = None
     outcome: str
     why: str = ""
+
+
+class RejectedClaim(ContractModel):
+    """A claim code could not bind to an observation, kept as the model made it.
+
+    `part` is "apply_entry" or "evidence"; `kind` is the claim's own kind.
+    Records written before this model stored each rejection as one string;
+    those load with the string as `reason` and no claim fields.
+    """
+
+    part: str = ""
+    kind: str = ""
+    cited_text: str = ""
+    observation: int = -1
+    href: str | None = None
+    reason: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_string(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            legacy: dict[str, Any] = {"reason": data}
+            return legacy
+        return data
+
+    def describe(self) -> str:
+        if not self.part:
+            return self.reason
+        target = f", href {self.href}" if self.href is not None else ""
+        return (
+            f"{self.part} {self.kind} {self.cited_text!r} "
+            f"(observation {self.observation}{target}): {self.reason}"
+        )
 
 
 class PageReadingRecord(ContractModel):
@@ -173,7 +216,7 @@ class PageReadingRecord(ContractModel):
     body_observation: int
     apply_entry: ApplyEntry | None
     evidence: list[PageEvidence]
-    rejected_claims: list[str]
+    rejected_claims: list[RejectedClaim]
     steps: list[StepLog]
     stop_reason: ReaderStop
     prompt_version: str
