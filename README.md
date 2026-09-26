@@ -115,11 +115,12 @@ Implemented (Slice 1 — one durable case):
   the JSON-LD `JobPosting` description when a client-rendered page has
   none), and a bounded page reader in front of verification (ADR-012): the
   model reads a dossier of page facts and may render the page or follow a
-  listed link, within code-enforced budgets; cited controls must match
+  listed link, with one citation repair inside the same code-enforced
+  step budget and structured rejection records; cited controls must match
   their labels and targets, and status uses one observation's own HTTP
-  response, authority and evidence. Model failures leave no inferred apply
-  entry; HTTP 200 alone never proves OPEN. Chromium rendering records
-  actual navigation metadata;
+  response, authority and evidence. Without a completed reading there is
+  no inferred apply entry; HTTP 200 alone never proves OPEN. Chromium
+  rendering records actual navigation metadata;
 - a code-enforced approval gate: a plain APPROVE needs a verified official
   OPEN; on an unverified posting the reviewer may approve only with a typed
   attestation of what they saw, re-checked by the API and audited as its

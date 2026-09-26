@@ -118,3 +118,33 @@ posting body; approval pins that body and the verification separately.
 - Adding a move with side effects still requires a new ADR. ATS adapters
   and human attestation are separate decisions, not implicit fallbacks.
 - Updating v4 §12 / §15 to describe this reader remains owner-reserved.
+
+## Amendment (2026-09-26, citation rigidity)
+
+Three live rejections on board pages had the fact present in the
+observation. The dossier showed JSON-LD under the contract's field names
+(`direct_apply: true`) while the rule and prompt asked for `directApply:
+true`; the model quoted the dossier verbatim and was rejected, a code bug.
+A closed notice cited from a followed page was rejected for a reason the
+persisted string did not preserve. In each case the reader's only answer
+was to end the reading with the claim dropped.
+
+- The dossier serializes JSON-LD fields under the source's own names
+  (`directApply`, `validThrough`, `datePosted`), and the `directApply`
+  rule also accepts the underscore spelling. The check is otherwise
+  unchanged: the fact must be true and the citation must name that pair.
+- **One citation repair per reading.** When a DONE reading has rejected
+  claims and a step remains in the budget, the step is recorded with the
+  rejections as its outcome and the model is asked once more, seeing that
+  step in `steps_so_far`. It may cite again from the dossier or leave the
+  claim out. Code still never repairs a citation on the model's behalf,
+  and repeating a rejected citation unchanged does not establish it. The
+  repair costs one of the three steps; the first DONE stands as the
+  reading if the extra step fails, so a model failure there is recorded
+  without discarding what verified. `page-reader/0.5.0`.
+- Rejected claims are persisted structurally (`part`, `kind`, `cited_text`,
+  `observation`, `href`, `reason`) instead of as one string, so a rejection
+  can be diagnosed from the record. Every DONE step's outcome states how
+  its reading verified, including the rejections, so the trail shows both
+  attempts. Records written before this load with the old string as the
+  reason.
