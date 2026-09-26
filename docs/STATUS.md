@@ -7,9 +7,9 @@ in the gitignored `HANDOFF.md`.
 | Field | Value |
 | --- | --- |
 | As of | 2026-09-26 |
-| Branch | `main`, no remote. Reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
+| Branch | `main`, no remote. Render network policy: `32567c5`; reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
-| Current focus | Reader evidence fixes are committed and automatically verified. Confirm the deployed reader and prior-assessment amendment against the remaining live checks. |
+| Current focus | The render network policy and reader evidence fixes are committed, deployed and live-checked. Resolve the salary-period gap and finish the remaining approval, citation and UI checks. |
 
 ## Current implementation
 
@@ -31,9 +31,15 @@ in the gitignored `HANDOFF.md`.
   links sharing a mailto target.
 - **Rendering:** a page with no visible HTML text and no controls gets a
   recorded step-0 pre-render, including JSON-LD-only shells. Docker ships
-  Chromium; host runs use `COUNTERSIGN_CHROMIUM_PATH`. Rendering is
-  restricted to vetted hosts and read-only requests. Provider outages
-  retry the Activity; they do not become verification verdicts.
+  Chromium; host runs use `COUNTERSIGN_CHROMIUM_PATH`. Render network
+  policy (ADR-015, implemented in `32567c5`): the main document stays on
+  the page host and its subdomains; resources may load from hosts the
+  fetched HTML names (at most ten, document order, DNS-pinned, GET/HEAD).
+  This replaced the subdomain-only rule after a live ATS shell rendered
+  empty because its bundle CDN and data host were blocked; replaying that
+  stored case under the new policy cited the apply control on the
+  official ATS host and classified OPEN. Provider outages retry the
+  Activity; they do not become verification verdicts.
 - **Provenance:** control labels and targets are checked together; claims
   on superseded pages must hold on their replacement. Verification pins
   the governing source, which supplies the posting body for evaluation,
@@ -119,20 +125,60 @@ the deployed two-round path, not browser polling or every live acceptance
 check. No deployment changes or live model calls were made during this
 cleanup/commit round.
 
+Code commit `32567c5` (ADR-015 render network policy, on top of the
+committed evidence fixes in `3d3377e`) was checked on 2026-09-26 in a
+fresh detached worktree and Python 3.14.3 venv, with front-end dependencies
+installed from `pnpm-lock.yaml`:
+
+- `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
+  108 Python files; `.venv/bin/pyright`: 0 errors;
+  `.venv/bin/lint-imports`: 3 contracts kept.
+- `.venv/bin/pytest -ra`: **209 passed, no skips**. PostgreSQL integration
+  used disposable database `countersign_code_32567c5` on the Compose
+  PostgreSQL at `127.0.0.1:5435`, dropped afterwards; Temporal used its
+  test server and rendering used real local Chromium. Coverage includes
+  a named second resource host and refusal of a main-document escape.
+- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+
+The ADR-015 documentation layer repeated all commands above in a second
+fresh detached worktree and venv, using disposable PostgreSQL database
+`countersign_docs_adr015` at the same endpoint: **209 passed, no skips**,
+with all static and web checks passing again. Live checks by the owner on
+2026-09-25 after the excerpt/dedupe fix: a company page and a board page
+classified OPEN_THIRD_PARTY_ONLY. Replay of the stored ATS shell case under
+ADR-015 with real navigation: OPEN. The worker was rebuilt with `3d3377e`
+and `32567c5` on 2026-09-26; the subsequent live evidence is recorded below.
+
 ## Next
 
-1. Finish live acceptance checks: an UNVERIFIED case re-evaluated with a
-   candidate-side note, polling through the round change, and a posting
-   without salary plus a note containing salary (extraction must remain
-   empty and compensation UNKNOWN). Broader reader/approval checks remain:
-   direct ATS, board → ATS, client-rendered shell and attested approval.
-2. Confirm deployment includes `3d3377e` (`page-reader/0.4.0`) and
-   `6e8b81c` (`evaluator/0.3.1`); verify the corrected reader and round pager.
-   Watch amended live summaries for what the note resolved and what remains,
-   without restated rules; check more than one model for anchoring on an
-   earlier inference about the candidate. Four identical-input replays
-   showed score variation of ±1; small cross-round changes need caution
-   until calibration cards exist.
+1. Live acceptance so far (2026-09-25 evening, `evaluator/0.3.1`, three
+   cases, two rounds each, two models): the re-evaluation with a reviewer
+   note is verified, including notes that were questions rather than
+   evidence — each round-2 summary answered the note directly, cited the
+   previous evaluation, said what changed and what remains without
+   restating rules, and carried no round-1 inference about the candidate
+   forward as fact. One case's round-2 summary narrated a ±1 score move
+   as a change, which is within the measured sampling noise. On
+   2026-09-26, after the rebuild for `3d3377e` and `32567c5` (image built
+   13:39 UTC, citation tolerance present in the container), five more
+   cases covered the reader paths that had not been hit live: direct ATS
+   postings on two ATS hosts read `OPEN` from the static page; a board
+   posting whose only entry pointed at an ATS was followed (`FOLLOW`, one
+   step, the model's stated reason persisted) and read `OPEN` on the
+   followed official page; a client-rendered ATS shell got the recorded
+   step-0 pre-render and read `OPEN` from the rendered document; a company
+   careers page stayed `OPEN_THIRD_PARTY_ONLY` as the authority policy
+   intends; one case ran a second round on a question note with a plain,
+   attributed summary. Still open: a posting without salary plus a note
+   containing salary (extraction must remain empty, compensation UNKNOWN);
+   an attested approval; a live posting whose model citation is the
+   JSON-LD `directApply` pair, to exercise the tolerance itself; and the
+   page's polling through the round change and the round pager, which are
+   not separately recorded.
+2. Decide the salary-period fix (below, remaining gaps): a monthly figure
+   is currently compared to the annual bands. Keep checking more than one
+   model for anchoring on an earlier inference about the candidate as
+   rounds accumulate.
 3. Before publication, run gitleaks and inspect tracked content. The owner
    adds the remote and pushes.
 4. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
@@ -159,5 +205,26 @@ cleanup/commit round.
 - Rubric decisions remain: no-profile score nullability, hard blockers and
   decision bands, pay-level risk wording, technical versus coordination
   work. Private operational notes remain in `HANDOFF.md`.
+- One observation from the amended live rounds, owner's call whether to
+  act: the summary follows the language of the reviewer's note (a note in
+  another language produced a summary in that language). The board case's
+  status change between rounds was not reader variance but the
+  pre-`3d3377e` citation rejection described in Next, item 2.
+- ADR-015 known limit (verified 2026-09-26): an HTTP redirect of the main
+  document to a named resource host is not aborted in flight — the browser
+  follows redirects without consulting the route guard — so that host
+  receives one GET before the render fails on the final-host check. No
+  observation results and no unnamed host is reachable. A browser test for
+  this shape is a follow-up; the main-document-outside-the-browser rework
+  was reverted as out of proportion.
+- **Salary period is not modelled.** A live ATS posting stated a monthly
+  CHF figure; the model extracted it as `min_amount` and
+  `compute_compensation_signal` compared it to the annual bands, giving
+  CONCERNING for a salary that annualised would not be. `SalaryExtraction`
+  has no period field and the signal assumes annual amounts. Proposed:
+  add `period` (`ANNUAL | MONTHLY | HOURLY | UNKNOWN`) to the extraction,
+  annualise monthly by twelve in the signal and return UNKNOWN for hourly
+  or unknown periods; that changes the evaluator's output schema (prompt
+  version bump) and a policy computation, so it is the owner's call.
 - Owner-reserved v4 edits: §9 needs-evidence edge; §12 / §14 old status name;
   §12 / §15 reader; §15 / §24 / §29 research loop when Slice 2.5 nears.

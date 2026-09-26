@@ -102,8 +102,12 @@ them.
   including the observed control-label/target pair;
   its budgets live in `ReaderConfig`, never in the prompt. The one
   code-initiated render is the recorded step-0 pre-render of a shell page
-  (no visible HTML text and no controls). Do not add a move, widen the allowlist,
-  or let a model claim bypass the check without a new ADR.
+  (no visible HTML text and no controls). Render network policy is
+  ADR-015: the main document may land only on the page host and its
+  subdomains; resources may load from hosts the fetched HTML itself names,
+  DNS-pinned, GET/HEAD, capped. No registrable-domain guesses and no
+  vendor or CDN lists. Do not add a move, widen either allowlist, or let a
+  model claim bypass the check without a new ADR.
 - **No optional nested objects at decision points in model-output
   contracts.** `ApplyEntry | None` let live models narrate an Apply control
   in `notes` and leave the field null on the same page, across routes and

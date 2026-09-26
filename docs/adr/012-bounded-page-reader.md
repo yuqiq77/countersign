@@ -1,6 +1,6 @@
 # ADR-012: A bounded page reader in front of verification
 
-- Status: accepted
+- Status: accepted; the renderer's host rule is amended by ADR-015
 - Date: 2026-09-20
 - Supersedes: nothing. Activates the reserved `MODEL` invocation class
   (ADR-004, ADR-011) for a second measured need.
