@@ -7,10 +7,13 @@ limit aborts early; validates every redirect hop. External content is data,
 never instructions.
 """
 
+import http.cookiejar
 import ipaddress
 import socket
 import time
+import urllib.request
 from dataclasses import dataclass
+from email.message import Message
 
 import httpx
 
@@ -42,15 +45,81 @@ class FetchResult:
 _shared_client: httpx.Client | None = None
 
 
-def _client_for(transport: httpx.BaseTransport | None) -> httpx.Client:
+class _NoCookieJar(http.cookiejar.CookieJar):
+    """A jar the shared client cannot use: it neither stores nor sends.
+
+    httpx stores every response's cookies in the client's jar and adds
+    them to every later request, keyed by the transport host — here a
+    pinned address that several sites may share — and it does so from
+    whichever thread is fetching. With Activities running concurrently,
+    one case's session cookie could be sent to another case's site on the
+    same address. Clearing the jar around each hop only narrows that
+    window; a jar that does nothing closes it.
+    """
+
+    def add_cookie_header(self, request: object) -> None:
+        return None
+
+    def extract_cookies(self, response: object, request: object) -> None:
+        return None
+
+
+class _CookieHeaders:
+    """The response-side view `http.cookiejar` needs: just the headers."""
+
+    def __init__(self, headers: httpx.Headers) -> None:
+        self._message = Message()
+        for name, value in headers.multi_items():
+            self._message.add_header(name, value)
+
+    def info(self) -> Message:
+        return self._message
+
+
+class FetchCookies:
+    """A cookie jar scoped to one fetch and keyed by the *logical* URL.
+
+    Connections are pinned to a vetted address, so the transport-level
+    request names an IP literal; a jar keyed by that would reject a
+    `Domain=` cookie and could hand one site's cookie to another site on
+    the same address. Keying by the hostname the redirect chain is really
+    about keeps a session across hops (an application form behind a
+    cookie-setting 302, for example) without any of that, and a jar per
+    fetch means nothing carries over between cases or threads.
+
+    Known laxness, accepted for now: Python's cookiejar sends a host-only
+    cookie (no `Domain=`) to subdomains of the setting host as well.
+    """
+
+    def __init__(self) -> None:
+        self._jar = http.cookiejar.CookieJar()
+
+    def header_for(self, url: httpx.URL) -> str | None:
+        request = urllib.request.Request(str(url))
+        self._jar.add_cookie_header(request)
+        return request.get_header("Cookie")
+
+    def store(self, url: httpx.URL, headers: httpx.Headers) -> None:
+        request = urllib.request.Request(str(url))
+        self._jar.extract_cookies(_CookieHeaders(headers), request)  # type: ignore[arg-type]
+
+
+def client_for(transport: httpx.BaseTransport | None) -> httpx.Client:
     """One long-lived client per worker process; ephemeral when tests inject
     a transport (httpx transports are client-level, not per-request)."""
 
     if transport is not None:
-        return httpx.Client(follow_redirects=False, timeout=TIMEOUT_SECONDS, transport=transport)
+        return httpx.Client(
+            follow_redirects=False,
+            timeout=TIMEOUT_SECONDS,
+            transport=transport,
+            cookies=_NoCookieJar(),
+        )
     global _shared_client
     if _shared_client is None:
-        _shared_client = httpx.Client(follow_redirects=False, timeout=TIMEOUT_SECONDS)
+        _shared_client = httpx.Client(
+            follow_redirects=False, timeout=TIMEOUT_SECONDS, cookies=_NoCookieJar()
+        )
     return _shared_client
 
 
@@ -168,7 +237,8 @@ def fetch_url(
     deadline = time.monotonic() + timeout_seconds
     chain: list[str] = []
     current = url
-    client = _client_for(transport)
+    client = client_for(transport)
+    cookies = FetchCookies()
     for _ in range(MAX_REDIRECTS + 1):
         logical = httpx.URL(current)
         if enforce_network_policy:
@@ -184,9 +254,13 @@ def fetch_url(
             target = logical
             headers = {"User-Agent": "countersign/0.1"}
             extensions = {}
+        cookie_header = cookies.header_for(logical)
+        if cookie_header:
+            headers["Cookie"] = cookie_header
         with client.stream(
             "GET", target, headers=headers, extensions=extensions, timeout=_remaining(deadline)
         ) as response:
+            cookies.store(logical, response.headers)
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get("location")
                 if not location:
