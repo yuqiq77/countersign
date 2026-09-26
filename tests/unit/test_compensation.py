@@ -1,6 +1,6 @@
 """Deterministic compensation signal over configured bands."""
 
-from countersign.contracts.enums import CompensationSignal, SourceAuthority
+from countersign.contracts.enums import CompensationSignal, SalaryPeriod, SourceAuthority
 from countersign.contracts.evaluation import SalaryExtraction
 from countersign.domain.compensation import SalaryBands, compute_compensation_signal
 
@@ -15,6 +15,7 @@ def extraction(**overrides: object) -> SalaryExtraction:
         "max_amount": None,
         "source_authority": SourceAuthority.OFFICIAL_COMPANY,
         "cited_text": "100k",
+        "period": SalaryPeriod.ANNUAL,
     }
     payload.update(overrides)
     return SalaryExtraction.model_validate(payload)
@@ -63,3 +64,39 @@ def test_bands_enforce_currency_case_and_threshold_order() -> None:
         SalaryBands(currency="USD", acceptable_min=120_000, attractive_min=90_000)
     with pytest.raises(ValueError, match="ascend"):
         SalaryBands(currency="USD", acceptable_min=0, attractive_min=2)
+
+
+def test_monthly_figures_are_annualised_and_other_periods_stay_unknown() -> None:
+    """A live posting stated a monthly figure that, compared as if annual,
+    read CONCERNING. Monthly is annualised by twelve; hourly or unstated
+    periods are not guessed."""
+
+    monthly = extraction(min_amount=9_000, period=SalaryPeriod.MONTHLY)  # 108k a year
+    assert compute_compensation_signal(monthly, BANDS) == CompensationSignal.ACCEPTABLE
+    high = extraction(min_amount=10_500, period=SalaryPeriod.MONTHLY)  # 126k a year
+    assert compute_compensation_signal(high, BANDS) == CompensationSignal.ATTRACTIVE
+    low = extraction(min_amount=7_000, period=SalaryPeriod.MONTHLY)  # 84k a year
+    assert compute_compensation_signal(low, BANDS) == CompensationSignal.CONCERNING
+    for period in (SalaryPeriod.HOURLY, SalaryPeriod.UNKNOWN):
+        assert (
+            compute_compensation_signal(extraction(min_amount=100_000, period=period), BANDS)
+            == CompensationSignal.UNKNOWN
+        ), period
+
+
+def test_period_is_required_of_the_model_but_older_records_read_back() -> None:
+    schema = SalaryExtraction.model_json_schema()
+    assert "period" in schema["required"]
+    legacy = SalaryExtraction.model_validate(
+        {
+            "official": True,
+            "currency": "USD",
+            "min_amount": 10_000,
+            "max_amount": None,
+            "source_authority": "OFFICIAL_ATS",
+            "cited_text": "from USD 10000 - monthly",
+        },
+        strict=False,
+    )
+    assert legacy.period == SalaryPeriod.UNKNOWN
+    assert compute_compensation_signal(legacy, BANDS) == CompensationSignal.UNKNOWN

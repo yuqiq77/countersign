@@ -119,6 +119,15 @@ class SeniorityFit(StrEnum):
     SKIP = "SKIP"
 
 
+class SalaryPeriod(StrEnum):
+    """The pay period a posting states for its salary figures."""
+
+    ANNUAL = "ANNUAL"
+    MONTHLY = "MONTHLY"
+    HOURLY = "HOURLY"
+    UNKNOWN = "UNKNOWN"
+
+
 class CompensationSignal(StrEnum):
     """Deterministically computed salary attractiveness label."""
 

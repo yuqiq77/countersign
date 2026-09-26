@@ -1,6 +1,8 @@
 """Evaluation contracts (v4 §14): typed, cited claims; honest naming."""
 
-from pydantic import Field
+from typing import Any, cast
+
+from pydantic import Field, model_validator
 
 from countersign.contracts.base import ContractModel
 from countersign.contracts.enums import (
@@ -8,6 +10,7 @@ from countersign.contracts.enums import (
     EvalDecision,
     JobStatus,
     Relevance,
+    SalaryPeriod,
     SeniorityFit,
     Severity,
     SourceAuthority,
@@ -18,7 +21,10 @@ class SalaryExtraction(ContractModel):
     """Salary data extracted from the posting, labeled by source authority.
 
     The model only extracts; the compensation signal is computed
-    deterministically by domain code (never by the model).
+    deterministically by domain code (never by the model). `period` is
+    required in the model's output schema so a monthly figure is never
+    compared to annual bands as if it were annual; records and workflow
+    histories written before the field read back as UNKNOWN.
     """
 
     official: bool
@@ -27,6 +33,19 @@ class SalaryExtraction(ContractModel):
     max_amount: int | None = None
     source_authority: SourceAuthority
     cited_text: str | None = None
+    period: SalaryPeriod = Field(
+        description=(
+            "The pay period the posting states for these amounts: ANNUAL, MONTHLY "
+            "or HOURLY; UNKNOWN when the posting does not say. Never infer it."
+        )
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _period_for_older_records(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "period" not in data:
+            return {**cast(dict[str, Any], data), "period": SalaryPeriod.UNKNOWN}
+        return cast(Any, data)
 
 
 class HardBlocker(ContractModel):

@@ -9,6 +9,7 @@ from countersign.contracts.enums import (
     CompensationSignal,
     EvalDecision,
     JobStatus,
+    SalaryPeriod,
     SeniorityFit,
     SourceAuthority,
 )
@@ -106,6 +107,7 @@ def test_compensation_signal_is_computed_not_modeled() -> None:
             max_amount=130_000,
             source_authority=SourceAuthority.OFFICIAL_COMPANY,
             cited_text="up to $130,000",
+            period=SalaryPeriod.ANNUAL,
         ),
         confidence=0.8,
         summary="canned",
@@ -201,6 +203,7 @@ def test_salary_source_facts_are_stamped_from_verification() -> None:
             max_amount=80_000,
             source_authority=SourceAuthority.OFFICIAL_COMPANY,
             cited_text="50-80K",
+            period=SalaryPeriod.ANNUAL,
         ),
         confidence=0.8,
         summary="canned",
@@ -305,7 +308,7 @@ def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() 
         generation=2,
     )
     assert record.operator_context_ids == ["dec-appr-case-1-g1-v1"]
-    assert record.prompt_version == "evaluator/0.3.1"
+    assert record.prompt_version == "evaluator/0.3.2"
     assert record.generation == 2
     assert run(FakeEvaluationProvider()).operator_context_ids == []
 
@@ -368,3 +371,9 @@ def test_previous_assessment_is_a_labelled_revisable_input_and_is_cited() -> Non
     )
     assert second.previous_evaluation_id == first.evaluation_id
     assert second.generation == 2
+
+
+def test_prompt_asks_for_the_pay_period_as_stated() -> None:
+    from countersign.gateway.evaluator import build_system_prompt
+
+    assert "Record the pay period exactly as the posting states it" in build_system_prompt()

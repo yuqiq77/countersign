@@ -8,8 +8,10 @@ operator's own salary.
 import hashlib
 from dataclasses import dataclass
 
-from countersign.contracts.enums import CompensationSignal
+from countersign.contracts.enums import CompensationSignal, SalaryPeriod
 from countersign.contracts.evaluation import SalaryExtraction
+
+MONTHS_PER_YEAR = 12
 
 
 @dataclass(frozen=True)
@@ -46,21 +48,29 @@ class SalaryBands:
 def compute_compensation_signal(
     extraction: SalaryExtraction | None, bands: SalaryBands
 ) -> CompensationSignal:
-    """Map extracted salary data onto the configured bands.
+    """Map extracted salary data onto the configured annual bands.
 
     Unknown, currency-mismatched, or amount-free extractions are UNKNOWN —
     the system never invents a salary judgment (anti-hallucination rule).
+    A monthly figure is annualised by twelve (the conservative reading; a
+    thirteenth salary would only raise it); an hourly or unstated period
+    is UNKNOWN rather than guessed. A live posting stated a monthly figure
+    that, compared as if annual, read CONCERNING.
     """
 
     if extraction is None:
         return CompensationSignal.UNKNOWN
     if extraction.currency is None or extraction.currency.upper() != bands.currency:
         return CompensationSignal.UNKNOWN
+    if extraction.period not in (SalaryPeriod.ANNUAL, SalaryPeriod.MONTHLY):
+        return CompensationSignal.UNKNOWN
 
     amounts = [a for a in (extraction.min_amount, extraction.max_amount) if a is not None]
     if not amounts:
         return CompensationSignal.UNKNOWN
     amount = max(amounts)
+    if extraction.period == SalaryPeriod.MONTHLY:
+        amount *= MONTHS_PER_YEAR
 
     if amount >= bands.attractive_min:
         return CompensationSignal.ATTRACTIVE
