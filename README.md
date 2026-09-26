@@ -134,8 +134,10 @@ Implemented (Slice 1 — one durable case):
   bounded schema-repair retry, token/latency/version capture; deterministic
   fake provider for tests and model-free runs;
 - deterministic compensation signal computed from extracted salary data
-  against acceptable and attractive thresholds: `CONCERNING`, `ACCEPTABLE`,
-  or `ATTRACTIVE`; missing data or a currency mismatch yields `UNKNOWN`;
+  against annual acceptable and attractive thresholds: `CONCERNING`,
+  `ACCEPTABLE`, or `ATTRACTIVE`; a monthly figure is annualised by twelve;
+  missing data, a currency mismatch, or an hourly or unstated pay period
+  yields `UNKNOWN`;
 - idempotent persistence (deterministic IDs, dedup constraints, converged
   retries) with append-only audit events in the same transaction;
 - Alembic migrations, Compose core profile, CI (ruff, pyright,

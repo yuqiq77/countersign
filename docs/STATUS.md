@@ -7,9 +7,9 @@ in the gitignored `HANDOFF.md`.
 | Field | Value |
 | --- | --- |
 | As of | 2026-09-26 |
-| Branch | `main`, no remote. Redirect cookie isolation: `7680df6`; render network policy: `32567c5`; reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
+| Branch | `main`, no remote. Salary periods: `c5494a6`; redirect cookie isolation: `7680df6`; render network policy: `32567c5`; reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
-| Current focus | Redirect cookie isolation is committed and automatically verified. Resolve the salary-period gap and reader citation failures; salary-note isolation, attestation, polling and round paging have live evidence. |
+| Current focus | Redirect cookie isolation and salary periods (`evaluator/0.3.2`) are committed. Deploy and live-check the salary-period fix; resolve reader citation failures next. Salary-note isolation, attestation, polling and round paging have live evidence. |
 
 ## Current implementation
 
@@ -60,8 +60,9 @@ in the gitignored `HANDOFF.md`.
   `job-case/{case_id}` workflow into the next generation. Later rounds
   skip intake/normalization, re-observe and re-evaluate, then create a new
   approval; three rounds maximum. Signals must match the current round.
-  `evaluator/0.3.1` receives all prior REQUEST_EVIDENCE reasons as labelled
-  operator context and, from round 2, the previous round's structured
+  `evaluator/0.3.2` (committed; last observed deployment: `0.3.1`) receives
+  all prior REQUEST_EVIDENCE reasons as labelled operator context and,
+  from round 2, the previous round's structured
   evaluation as a labelled revisable judgment (ADR-014 amendment): the
   current posting, profile and context remain the basis, overturning is
   allowed, and candidate facts the earlier round inferred are not facts.
@@ -174,6 +175,26 @@ dependencies installed from `pnpm-lock.yaml`:
 The commit verification did not deploy the worker or make live model
 calls. The running worker's cookie implementation was not rechecked.
 
+Code commit `c5494a6` (salary periods) was checked on 2026-09-26 in a
+fresh detached worktree and Python 3.14.3 venv, with front-end
+dependencies installed from `pnpm-lock.yaml`:
+
+- `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
+  109 Python files; `.venv/bin/pyright`: 0 errors;
+  `.venv/bin/lint-imports`: 3 contracts kept.
+- `.venv/bin/pytest -ra`: **216 passed, no skips**. PostgreSQL integration
+  used disposable database `countersign_salary_code_c5494a6` at
+  `127.0.0.1:5435` (dropped afterwards); other database fixtures used
+  SQLite, Temporal used its test server and browser tests used local
+  Chrome. Private profile and salary inputs were unset; model providers
+  were fakes. New coverage includes monthly annualisation across all
+  three bands, hourly and unstated periods UNKNOWN, the required JSON
+  schema field, a pre-field payload reading back as UNKNOWN and the
+  prompt rule. The salary fixture uses synthetic, matching-currency data.
+- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+
+No deployment changes or live model calls were made during this check.
+
 ## Next
 
 1. Live acceptance so far (2026-09-25 evening, `evaluator/0.3.1`, three
@@ -234,10 +255,10 @@ calls. The running worker's cookie implementation was not rechecked.
    outcome and ask once more, so the model can re-cite or say NONE; (c)
    store rejected claims structurally (kind, text, observation, href),
    not as strings, so a rejection can be diagnosed from the record.
-3. Decide the salary-period fix (below, remaining gaps): a monthly figure
-   is currently compared to the annual bands. Keep checking more than one
-   model for anchoring on an earlier inference about the candidate as
-   rounds accumulate.
+3. Deploy the salary-period fix (`c5494a6`), then rerun the monthly-salary
+   posting: its stored round keeps CONCERNING, a new round should classify
+   the annualised figure. Keep checking more than one model for anchoring on an earlier inference
+   about the candidate as rounds accumulate.
 4. Before publication, run gitleaks and inspect tracked content. The owner
    adds the remote and pushes.
 5. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
@@ -288,14 +309,15 @@ calls. The running worker's cookie implementation was not rechecked.
   through the relay at the time. The quarantine path worked as designed,
   but live acceptance of contract-shaped behaviour should run on the
   direct API, and a relay result carries no structured-output guarantee.
-- **Salary period is not modelled.** A live ATS posting stated a monthly
-  CHF figure; the model extracted it as `min_amount` and
-  `compute_compensation_signal` compared it to the annual bands, giving
-  CONCERNING for a salary that annualised would not be. `SalaryExtraction`
-  has no period field and the signal assumes annual amounts. Proposed:
-  add `period` (`ANNUAL | MONTHLY | HOURLY | UNKNOWN`) to the extraction,
-  annualise monthly by twelve in the signal and return UNKNOWN for hourly
-  or unknown periods; that changes the evaluator's output schema (prompt
-  version bump) and a policy computation, so it is the owner's call.
+- **Salary period, fixed in `c5494a6`; live acceptance pending.** A live
+  ATS posting stated a monthly figure; the model extracted it as
+  `min_amount` and the signal compared it to the annual bands, giving
+  CONCERNING for a salary that
+  annualised would not be. `SalaryExtraction.period`
+  (`ANNUAL | MONTHLY | HOURLY | UNKNOWN`) is now required in the model's
+  output schema with a prompt rule to record it as stated; the signal
+  annualises monthly by twelve and returns UNKNOWN for hourly or unstated
+  periods; records and workflow histories written before the field read
+  back as UNKNOWN. `evaluator/0.3.2`. Stored signals are not recomputed.
 - Owner-reserved v4 edits: §9 needs-evidence edge; §12 / §14 old status name;
   §12 / §15 reader; §15 / §24 / §29 research loop when Slice 2.5 nears.
