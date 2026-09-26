@@ -25,9 +25,22 @@ def render_server(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[str, list[
                 self.send_header("Location", "/error")
                 self.end_headers()
                 return
+            port = self.headers.get("Host", "").rsplit(":", 1)[-1]
+            if self.path == "/inject.js":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.end_headers()
+                self.wfile.write(
+                    b"document.body.insertAdjacentHTML('beforeend',"
+                    b" '<a href=\"/apply\">Apply now</a>');"
+                )
+                return
             self.send_response(503 if self.path == "/error" else 200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
+            if self.path in ("/spa", "/hop"):
+                self.wfile.write(_page(self.path, port))
+                return
             self.wfile.write(b"""<h1>Engineer</h1><button>Apply</button><script>
               fetch('/write', {method: 'POST'}).catch(() => {});
               fetch('http://127.0.0.1:' + location.port + '/private').catch(() => {});
@@ -61,6 +74,41 @@ def render_server(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[str, list[
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+ASSETS = "assets.example.test"  # a different host, not a subdomain of the page host
+
+
+def _page(path: str, port: str) -> bytes:
+    """The two ADR-015 pages: one loads its apply control from a script on
+    another named host; one tries to move the main document there."""
+
+    if path == "/spa":
+        return f'<h1>Engineer</h1><script src="http://{ASSETS}:{port}/inject.js"></script>'.encode()
+    return (
+        f"<h1>Engineer</h1><script>location.href = 'http://{ASSETS}:{port}/landed';</script>"
+    ).encode()
+
+
+def test_resources_may_load_from_a_host_the_page_names(
+    render_server: tuple[str, list[str]],
+) -> None:
+    base, visited = render_server
+    port = base.rsplit(":", 1)[-1]
+    result = renderer.render_url(f"{base}/spa", body=_page("/spa", port), timeout_seconds=10)
+    assert result is not None
+    assert b"Apply now" in result.body
+    assert visited == ["/spa", "/inject.js"]
+
+
+def test_main_document_may_not_navigate_to_a_resource_host(
+    render_server: tuple[str, list[str]],
+) -> None:
+    base, visited = render_server
+    port = base.rsplit(":", 1)[-1]
+    with pytest.raises(renderer.RenderError, match="left the page host"):
+        renderer.render_url(f"{base}/hop", body=_page("/hop", port), timeout_seconds=10)
+    assert "/landed" not in visited  # aborted by the guard before any request left
 
 
 def test_render_preserves_redirect_status_and_blocks_unapproved_requests(
