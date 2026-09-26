@@ -109,7 +109,9 @@ Implemented (Slice 1 — one durable case):
   durable approval Signal wait, with quarantine/closed/expiry paths and a
   needs-evidence stop before fit evaluation when the reader found no
   posting text;
-- SSRF-guarded fetch, deterministic HTML normalization (visible text, or
+- SSRF-guarded fetch (each hop pinned to its vetted address, with session
+  cookies kept per fetch under the hop's real hostname and never in the
+  shared client), deterministic HTML normalization (visible text, or
   the JSON-LD `JobPosting` description when a client-rendered page has
   none), and a bounded page reader in front of verification (ADR-012): the
   model reads a dossier of page facts and may render the page or follow a

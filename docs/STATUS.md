@@ -7,12 +7,18 @@ in the gitignored `HANDOFF.md`.
 | Field | Value |
 | --- | --- |
 | As of | 2026-09-26 |
-| Branch | `main`, no remote. Render network policy: `32567c5`; reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
+| Branch | `main`, no remote. Redirect cookie isolation: `7680df6`; render network policy: `32567c5`; reader evidence fixes: `3d3377e`; prior-assessment input and round history: `6e8b81c`. Documentation committed separately. |
 | Slice | Slice 1 (one durable case): code complete; exit milestone (Track A) observed 2026-09-18; worker-kill recovery repeated 2026-09-19. |
-| Current focus | The render network policy and reader evidence fixes are committed, deployed and live-checked. Resolve the salary-period gap and finish the remaining approval, citation and UI checks. |
+| Current focus | Redirect cookie isolation is committed and automatically verified. Resolve the salary-period gap and reader citation failures; salary-note isolation, attestation, polling and round paging have live evidence. |
 
 ## Current implementation
 
+- **HTTP fetch:** cookies are scoped to one fetch's redirect chain and
+  matched against each hop's logical URL. The shared HTTP client's jar
+  neither stores nor sends cookies, including across concurrent
+  Activities sharing a pinned address. Each hop still resolves and
+  validates its destination before connecting to the vetted address.
+  Host-only cookie matching retains the documented subdomain limitation.
 - **Reader (ADR-012):** bounded FOLLOW/RENDER loop inside `verify_status`;
   at most 120 controls per observation (exact label/target duplicates
   merged, document order), text up to 16,000 characters and beyond that
@@ -149,6 +155,25 @@ classified OPEN_THIRD_PARTY_ONLY. Replay of the stored ATS shell case under
 ADR-015 with real navigation: OPEN. The worker was rebuilt with `3d3377e`
 and `32567c5` on 2026-09-26; the subsequent live evidence is recorded below.
 
+Code commit `7680df6` (redirect cookie isolation) was checked on 2026-09-26
+in a fresh detached worktree and Python 3.14.3 venv, with front-end
+dependencies installed from `pnpm-lock.yaml`:
+
+- `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
+  109 Python files; `.venv/bin/pyright`: 0 errors;
+  `.venv/bin/lint-imports`: 3 contracts kept.
+- `.venv/bin/pytest -ra`: **213 passed, no skips**, including redirect
+  session continuity, domain rejection and concurrent cross-case cookie
+  isolation. PostgreSQL integration used disposable database
+  `countersign_cookie_code_7680df6` at `127.0.0.1:5435` (dropped after
+  verification); other database fixtures used SQLite, Temporal used its
+  test server and browser tests used local Chrome. Private profile and
+  salary environment inputs were unset; model providers were fakes.
+- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+
+The commit verification did not deploy the worker or make live model
+calls. The running worker's cookie implementation was not rechecked.
+
 ## Next
 
 1. Live acceptance so far (2026-09-25 evening, `evaluator/0.3.1`, three
@@ -169,19 +194,53 @@ and `32567c5` on 2026-09-26; the subsequent live evidence is recorded below.
    step-0 pre-render and read `OPEN` from the rendered document; a company
    careers page stayed `OPEN_THIRD_PARTY_ONLY` as the authority policy
    intends; one case ran a second round on a question note with a plain,
-   attributed summary. Still open: a posting without salary plus a note
-   containing salary (extraction must remain empty, compensation UNKNOWN);
-   an attested approval; a live posting whose model citation is the
-   JSON-LD `directApply` pair, to exercise the tolerance itself; and the
-   page's polling through the round change and the round pager, which are
-   not separately recorded.
-2. Decide the salary-period fix (below, remaining gaps): a monthly figure
+   attributed summary. Later on 2026-09-26 the owner covered three more
+   checks: a board posting with a note stating an expected salary left the
+   extraction empty and compensation UNKNOWN across three rounds; an
+   attested approval on a company careers case recorded the decision and
+   its `human.verification_attested` event; the page kept polling and
+   paging through three rounds. Three board cases also produced the
+   findings in item 2.
+2. Reader citation rigidity (three live rejections on board pages, all
+   with the fact present in the observation): the dossier shows JSON-LD
+   fields under contract names (`direct_apply`) while the rule and prompt
+   demand the source spelling (`directApply: true`), so a model that
+   quoted the dossier verbatim was rejected — a code bug; a citation of
+   the key without its value was rejected by design; and a closed notice
+   cited from a followed application page was rejected although the text
+   matches. A non-null `href` that is not a control would explain the
+   latter rejection; the raw proposal was not stored, so that remains
+   unconfirmed. No rejection feedback reached the model. The JSON-LD
+   readings ended UNVERIFIED; the closed-notice case retained its board
+   entry and ended OPEN_THIRD_PARTY_ONLY, then entered QUARANTINED after
+   the evaluator's contract failure. The closed notice itself was an
+   artefact of ours, found by the owner and fixed in `7680df6`: the fetcher
+   pins each hop to the vetted address, so the transport request names
+   an IP literal and the client's cookie jar rejected the ATS's `Domain=`
+   session cookie set on a 302; the token
+   URL then answered "application not found" (1,440 chars) where a
+   browser gets the application form (45,647 chars). Cookies are now kept
+   per fetch in a jar keyed by the logical hostname and sent on each hop;
+   the shared client is built with a jar that neither stores nor sends,
+   because the owner reproduced the earlier clear-around-each-hop version
+   leaking one case's session cookie to another site on the same pinned
+   address under concurrent Activities. A deterministic two-thread test
+   covers that interleaving; the pinning is unchanged. Verified by
+   refetching the same entry through the fixed pinned path.
+   Proposed, owner's call: (a) show JSON-LD fields under their source
+   names in the dossier and accept the underscore form in the rule; (b)
+   a bounded citation repair — after a DONE with rejected claims, and
+   while the step budget allows, record the rejections as the step's
+   outcome and ask once more, so the model can re-cite or say NONE; (c)
+   store rejected claims structurally (kind, text, observation, href),
+   not as strings, so a rejection can be diagnosed from the record.
+3. Decide the salary-period fix (below, remaining gaps): a monthly figure
    is currently compared to the annual bands. Keep checking more than one
    model for anchoring on an earlier inference about the candidate as
    rounds accumulate.
-3. Before publication, run gitleaks and inspect tracked content. The owner
+4. Before publication, run gitleaks and inspect tracked content. The owner
    adds the remote and pushes.
-4. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
+5. Slice 2 retains the v4 §24 timebox: policy watchlist and official-domain
    mapping, ATS adapters, scans and stale rechecks, capability/route
    registries, calibration, traces and cost dashboard. Tickets are
    owner-read before implementation. Slice 2.5 research follows ADR-011
@@ -209,7 +268,8 @@ and `32567c5` on 2026-09-26; the subsequent live evidence is recorded below.
   act: the summary follows the language of the reviewer's note (a note in
   another language produced a summary in that language). The board case's
   status change between rounds was not reader variance but the
-  pre-`3d3377e` citation rejection described in Next, item 2.
+  pre-`3d3377e` citation rejection; later runs also exposed the separate
+  citation failures recorded in Next, item 2.
 - ADR-015 known limit (verified 2026-09-26): an HTTP redirect of the main
   document to a named resource host is not aborted in flight — the browser
   follows redirects without consulting the route guard — so that host
@@ -217,6 +277,17 @@ and `32567c5` on 2026-09-26; the subsequent live evidence is recorded below.
   observation results and no unnamed host is reachable. A browser test for
   this shape is a follow-up; the main-document-outside-the-browser rework
   was reverted as out of proportion.
+- **Host-only cookies reach subdomains.** The per-fetch jar uses
+  Python's cookiejar policy, which sends a cookie set without `Domain=` to
+  subdomains of the setting host as well as the host itself. Accepted as
+  a known laxness for now; a stricter policy is a small follow-up.
+- **The relay does not appear to enforce structured outputs.** A board
+  case was quarantined after the evaluator's output failed the contract
+  twice with a list where an object is required, something a
+  grammar-constrained response cannot produce; the worker was routed
+  through the relay at the time. The quarantine path worked as designed,
+  but live acceptance of contract-shaped behaviour should run on the
+  direct API, and a relay result carries no structured-output guarantee.
 - **Salary period is not modelled.** A live ATS posting stated a monthly
   CHF figure; the model extracted it as `min_amount` and
   `compute_compensation_signal` compared it to the annual bands, giving
