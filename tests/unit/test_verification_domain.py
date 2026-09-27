@@ -70,39 +70,20 @@ def _verification(status: JobStatus) -> VerificationResult:
     )
 
 
-def test_plain_approve_requires_verified_open() -> None:
-    """The lifecycle gate, not a display concern: without a verified OPEN,
-    the approval request itself must not accept a plain APPROVE."""
+def test_approve_is_offered_on_any_pinned_verification_that_is_not_closed() -> None:
+    """The lifecycle gate (ADR-013 as amended): the reviewer may approve a
+    posting the system could not verify, and the approval then records their
+    own verification. CLOSED and EXPIRED are guards the workflow ends before
+    approval; a missing verification is never approvable."""
 
-    assert ApprovalDecision.APPROVE in allowed_decisions_for(_verification(JobStatus.OPEN))
-    for status in (
-        JobStatus.OPEN_THIRD_PARTY_ONLY,
-        JobStatus.UNVERIFIED,
-    ):
+    for status in (JobStatus.OPEN, JobStatus.OPEN_THIRD_PARTY_ONLY, JobStatus.UNVERIFIED):
         allowed = allowed_decisions_for(_verification(status))
-        assert ApprovalDecision.APPROVE not in allowed, status
+        assert ApprovalDecision.APPROVE in allowed, status
         assert ApprovalDecision.REJECT in allowed
         assert ApprovalDecision.REQUEST_EVIDENCE in allowed
-    assert ApprovalDecision.APPROVE not in allowed_decisions_for(None)
-
-
-def test_attestation_opens_the_gate_only_where_nothing_says_closed() -> None:
-    """ADR-013: a reviewer's own observation lets APPROVE through on a posting
-    the system could not verify; it never reopens CLOSED/EXPIRED and cannot
-    stand in for a missing verification."""
-
-    from countersign.contracts.cases import Attestation
-
-    signed = Attestation(observed_open=True, note="application form accepted input today")
-    for status in (JobStatus.UNVERIFIED, JobStatus.OPEN_THIRD_PARTY_ONLY):
-        assert ApprovalDecision.APPROVE not in allowed_decisions_for(_verification(status))
-        assert ApprovalDecision.APPROVE in allowed_decisions_for(_verification(status), signed)
     for status in (JobStatus.CLOSED, JobStatus.EXPIRED):
-        assert ApprovalDecision.APPROVE not in allowed_decisions_for(
-            _verification(status), signed
-        ), status
-    assert ApprovalDecision.APPROVE not in allowed_decisions_for(None, signed)
-    assert ApprovalDecision.APPROVE in allowed_decisions_for(_verification(JobStatus.OPEN), signed)
+        assert ApprovalDecision.APPROVE not in allowed_decisions_for(_verification(status)), status
+    assert ApprovalDecision.APPROVE not in allowed_decisions_for(None)
 
 
 def test_request_evidence_is_offered_only_below_the_round_cap() -> None:

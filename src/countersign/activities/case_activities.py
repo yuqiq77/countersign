@@ -30,6 +30,7 @@ from countersign.contracts.enums import (
     ApprovalRequestStatus,
     CaseState,
     EvidenceKind,
+    JobStatus,
     ObservationHow,
 )
 from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
@@ -410,9 +411,9 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
 def create_approval(payload: CaseWorkflowInput) -> ApprovalRequestOutcome:
     """Create the durable approval request and enter PENDING_APPROVAL.
 
-    The allowed decisions come from the lifecycle gate (plain APPROVE only
-    on a verified official OPEN), and the artifacts under review are pinned
-    to the request at creation.
+    The allowed decisions come from the lifecycle gate (APPROVE needs a
+    verification that is not CLOSED or EXPIRED), and the artifacts under
+    review are pinned to the request at creation.
     """
 
     expires_at = repo.utcnow() + timedelta(days=APPROVAL_TTL_DAYS)
@@ -454,6 +455,19 @@ def finalize_decision(signal: DecisionSignal) -> None:
             raise ApplicationError(
                 "unknown approval request", type="MissingApproval", non_retryable=True
             )
+        # ADR-013 as amended: approving a posting the system did not verify
+        # OPEN is the reviewer's own verification. The fact is derived here
+        # from the verification pinned to the request, not typed by the
+        # reviewer and not carried by the Signal, so the decision row, the
+        # audit event and the verification cannot disagree.
+        pinned = (
+            repo.get_verification(session, request.verification_id)
+            if request.verification_id is not None
+            else None
+        )
+        approved_without_official_open = signal.decision == ApprovalDecision.APPROVE and (
+            pinned is None or pinned.status != JobStatus.OPEN
+        )
         try:
             repo.record_decision(
                 session,
@@ -462,8 +476,7 @@ def finalize_decision(signal: DecisionSignal) -> None:
                 reason=signal.reason,
                 actor=signal.actor,
                 decision_version=signal.decision_version,
-                attested_open=signal.attested_open,
-                attestation_note=signal.attestation_note,
+                approved_without_official_open=approved_without_official_open,
             )
         except repo.DecisionConflictError as exc:
             raise ApplicationError(str(exc), type="DecisionConflict", non_retryable=True) from exc

@@ -7,7 +7,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   getCase,
   submitDecision,
-  type Attestation,
   type CaseDetail,
 } from "../../../lib/api";
 
@@ -29,10 +28,6 @@ const STATUS_COPY: Record<string, string> = {
   CLOSED: "Closed",
   EXPIRED: "Expired",
 };
-
-// A closed or expired posting is never attestable (ADR-013); the workflow
-// closes such cases before approval, so this is a guard, not a path.
-const NEVER_ATTESTABLE = new Set(["CLOSED", "EXPIRED"]);
 
 const DECISION_LABELS: Record<string, { label: string; className: string }> = {
   APPROVE: {
@@ -56,8 +51,6 @@ export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [reason, setReason] = useState("");
-  const [attest, setAttest] = useState(false);
-  const [attestNote, setAttestNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Which round's evaluation is shown; null means the latest, and a new
@@ -87,12 +80,10 @@ export default function CaseDetailPage() {
   }, [refresh, inFlight]);
 
   // A new round brings a new approval request: nothing typed for the
-  // previous one carries over, least of all an attestation.
+  // previous one carries over.
   const approvalId = detail?.approval?.approval_request_id ?? null;
   useEffect(() => {
     setReason("");
-    setAttest(false);
-    setAttestNote("");
   }, [approvalId]);
 
   const roundCount = detail?.evaluations.length ?? 0;
@@ -100,7 +91,7 @@ export default function CaseDetailPage() {
     setRoundIndex(null);
   }, [roundCount]);
 
-  async function decide(decision: string, attestation?: Attestation) {
+  async function decide(decision: string) {
     if (!detail?.approval || !reason.trim()) {
       setError("A reason is required for every decision.");
       return;
@@ -111,7 +102,6 @@ export default function CaseDetailPage() {
         detail.approval.approval_request_id,
         decision,
         reason.trim(),
-        attestation,
       );
       await refresh();
     } catch (e) {
@@ -141,14 +131,8 @@ export default function CaseDetailPage() {
     : [];
   const canDecide =
     detail.state === "PENDING_APPROVAL" && detail.approval?.status === "PENDING";
-  const approveAllowed = detail.approval?.allowed_decisions.includes("APPROVE") ?? false;
   const reEvaluationAllowed =
     detail.approval?.allowed_decisions.includes("REQUEST_EVIDENCE") ?? false;
-  const attestable =
-    canDecide &&
-    !approveAllowed &&
-    detail.verification !== null &&
-    !NEVER_ATTESTABLE.has(detail.verification.status);
 
   return (
     <main className="mx-auto max-w-4xl space-y-8 px-6 py-12 text-sm">
@@ -385,49 +369,17 @@ export default function CaseDetailPage() {
                   );
                 })}
               </div>
-              {!approveAllowed ? (
-                <p className="text-xs text-amber-400">
-                  Plain approval is gated: no application entry was confirmed on
-                  an official source.
+              {/* ADR-013 as amended: approving a posting the system did not
+                  verify OPEN is the reviewer's own verification, derived and
+                  recorded by the server. Nothing is typed to prove it; this
+                  line only says so. */}
+              {canDecide &&
+              detail.verification !== null &&
+              detail.verification.status !== "OPEN" ? (
+                <p className="text-xs text-neutral-500">
+                  Not verified on an official source ({detail.verification.reason}).
+                  Approving records that you checked the posting yourself.
                 </p>
-              ) : null}
-              {attestable ? (
-                /* ADR-013: the reviewer may sign for an unverified posting
-                   themselves. The server re-checks the gate with the
-                   attestation and records it as its own audit event. */
-                <div className="space-y-2 rounded-xl border border-amber-700 p-4">
-                  <label className="flex items-center gap-2 text-neutral-300">
-                    <input
-                      type="checkbox"
-                      checked={attest}
-                      onChange={(e) => setAttest(e.target.checked)}
-                    />
-                    I verified this posting is open myself
-                  </label>
-                  <input
-                    value={attestNote}
-                    onChange={(e) => setAttestNote(e.target.value)}
-                    disabled={!attest}
-                    placeholder="What you saw, e.g. the application form loaded and accepted input today (recorded in the audit log)"
-                    className="w-full rounded-xl border border-neutral-700 bg-transparent px-4 py-2 outline-none focus:border-amber-500 disabled:opacity-50"
-                  />
-                  <button
-                    onClick={() =>
-                      void decide("APPROVE", {
-                        observed_open: true,
-                        note: attestNote.trim(),
-                      })
-                    }
-                    disabled={busy || !attest || !attestNote.trim()}
-                    className="rounded-xl border border-amber-600 px-5 py-2 font-medium text-amber-300 disabled:opacity-50"
-                  >
-                    Approve on my own attestation
-                  </button>
-                  <p className="text-xs text-neutral-500">
-                    The decision reason above is still required. The attestation is
-                    recorded as a separate human event.
-                  </p>
-                </div>
               ) : null}
             </div>
           ) : (

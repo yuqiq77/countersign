@@ -164,17 +164,20 @@ def test_approval_request_is_idempotent_per_generation() -> None:
         assert first.id == second.id
 
 
-def test_attested_decision_writes_its_own_audit_event_in_the_same_transaction() -> None:
-    """ADR-013: signing for an unverified posting is a searchable human event,
-    and an unattested replay of the same version is a different decision."""
+def test_approval_without_official_open_is_recorded_as_the_reviewers_own() -> None:
+    """ADR-013 as amended: approving a posting the system did not verify OPEN
+    is kept on the row and as a searchable human event in the same
+    transaction; a replay of the same content is a no-op and a different
+    reason is a conflict."""
 
+    reason = "fits the profile; the application form accepted input today"
     with session_scope() as session:
         repo.create_case(session, case_id="c1", url="https://example.com/j/1")
         row = repo.create_approval_request(
             session,
             case_id="c1",
             generation=1,
-            allowed=[ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE],
+            allowed=[ApprovalDecision.APPROVE, ApprovalDecision.REJECT],
             expires_at=datetime.now(UTC) + timedelta(days=7),
         )
         approval_id = row.id
@@ -183,11 +186,10 @@ def test_attested_decision_writes_its_own_audit_event_in_the_same_transaction() 
             session,
             approval_request_id=approval_id,
             decision=ApprovalDecision.APPROVE,
-            reason="fits the profile",
+            reason=reason,
             actor="admin",
             decision_version=1,
-            attested_open=True,
-            attestation_note="application form loaded and accepted input today",
+            approved_without_official_open=True,
         )
     assert applied is True
     with session_scope() as session:
@@ -198,18 +200,27 @@ def test_attested_decision_writes_its_own_audit_event_in_the_same_transaction() 
             )
         }
         attested = audits["human.verification_attested"]
-        assert attested.reason == "application form loaded and accepted input today"
+        assert attested.reason == reason
         assert attested.actor_type == ActorType.HUMAN.value
         assert attested.actor_id == "admin"
-        assert audits["approval.approve"].reason == "fits the profile"
+        assert audits["approval.approve"].reason == reason
         decision = repo.get_decision(session, approval_id, 1)
-        assert decision is not None and decision.attested_open is True
+        assert decision is not None and decision.approved_without_official_open is True
+        replay = repo.record_decision(
+            session,
+            approval_request_id=approval_id,
+            decision=ApprovalDecision.APPROVE,
+            reason=reason,
+            actor="admin",
+            decision_version=1,
+        )
+        assert replay is False
         with pytest.raises(repo.DecisionConflictError):
             repo.record_decision(
                 session,
                 approval_request_id=approval_id,
                 decision=ApprovalDecision.APPROVE,
-                reason="fits the profile",
+                reason="another reason",
                 actor="admin",
                 decision_version=1,
             )

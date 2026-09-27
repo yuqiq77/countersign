@@ -4,12 +4,11 @@ The model proposes; these gates decide. No `APPLY_NOW` without a verified
 `OPEN` status, and hard blockers are surfaced, never silently dropped.
 """
 
-from countersign.contracts.cases import Attestation
 from countersign.contracts.enums import ApprovalDecision, EvalDecision, JobStatus
 from countersign.contracts.evaluation import ModelEvaluation
 from countersign.contracts.verification import VerificationResult
 
-_NEVER_ATTESTABLE = (JobStatus.CLOSED, JobStatus.EXPIRED)
+_NEVER_APPROVABLE = (JobStatus.CLOSED, JobStatus.EXPIRED)
 
 # Evidence-loop rounds per case (ADR-014). At the cap the approval offers no
 # REQUEST_EVIDENCE: three rounds of context is a conversation; more is a
@@ -25,31 +24,27 @@ def apply_now_permitted(verification: VerificationResult) -> bool:
 
 def allowed_decisions_for(
     verification: VerificationResult | None,
-    attestation: Attestation | None = None,
     *,
     generation: int = 1,
 ) -> list[ApprovalDecision]:
-    """The lifecycle gate: APPROVE needs a verified official OPEN, or a human
-    attestation on a posting the system could not verify (ADR-013);
-    REQUEST_EVIDENCE is offered while evidence-loop rounds remain (ADR-014).
+    """The lifecycle gate: which decisions an approval request accepts.
 
-    This constrains what the approval request accepts — not merely what the
-    UI displays. The stored allowed set on a request is the no-attestation
-    list; the API recomputes with the submitted attestation at decision
-    time. An attestation is a separately audited human decision: it never
-    reopens a CLOSED or EXPIRED verification and cannot stand in for a
-    missing one. "No evidence" means a human must sign for it, not that
-    nobody may act.
+    APPROVE is offered on any pinned verification that is not CLOSED or
+    EXPIRED (ADR-013 as amended). The system's own framing stays gated
+    separately (`gated_decision`): it never presents a posting as apply-now
+    without a verified OPEN. Approving a posting the system did not verify
+    is the reviewer's own verification, derived and recorded by the
+    decision Activity; nothing is typed to prove it. REQUEST_EVIDENCE is
+    offered while evidence-loop rounds remain (ADR-014).
+
+    The set is computed once, against the verification pinned to the
+    request, and stored on it; the API checks decisions against that set.
+    In practice every pending approval accepts APPROVE: the workflow ends
+    CLOSED/EXPIRED cases before approval and always pins a verification,
+    so the two checks below are guards, not a path.
     """
 
-    approve = verification is not None and (
-        apply_now_permitted(verification)
-        or (
-            attestation is not None
-            and attestation.observed_open
-            and verification.status not in _NEVER_ATTESTABLE
-        )
-    )
+    approve = verification is not None and verification.status not in _NEVER_APPROVABLE
     allowed = [ApprovalDecision.APPROVE] if approve else []
     allowed.append(ApprovalDecision.REJECT)
     if generation < MAX_GENERATIONS:

@@ -191,8 +191,6 @@ def _seed_approval(
 
 
 _GATED = [ApprovalDecision.REJECT, ApprovalDecision.REQUEST_EVIDENCE]
-_ATTESTED_NOTE = "the application form loaded and accepted input today"
-_ATTESTED = {"observed_open": True, "note": _ATTESTED_NOTE}
 
 
 @pytest.mark.usefixtures("db")
@@ -285,109 +283,54 @@ async def test_quoted_decision_version_is_rejected(
 
 
 @pytest.mark.usefixtures("db")
-async def test_attested_approve_passes_the_gate_on_an_unverified_posting(
+async def test_approve_on_an_unverified_posting_needs_nothing_typed(
     stub_temporal: _StubTemporal,
 ) -> None:
-    """ADR-013: the stored allowed set stays the no-attestation list; the API
-    re-checks the gate with the reviewer's attestation at submit time."""
-
-    approval_id = _seed_approval(
-        allowed=_GATED, status=ApprovalRequestStatus.PENDING, verification=JobStatus.UNVERIFIED
-    )
-    url = f"/v1/approvals/{approval_id}/decisions"
-    async with _client() as client:
-        plain = await client.post(
-            url, json={"decision": "APPROVE", "reason": "fits", "decision_version": 1}
-        )
-        attested = await client.post(
-            url,
-            json={
-                "decision": "APPROVE",
-                "reason": "fits",
-                "decision_version": 1,
-                "attestation": _ATTESTED,
-            },
-        )
-    assert plain.status_code == 400
-    assert attested.status_code == 200 and attested.json()["accepted"] is True
-    assert stub_temporal.signals == ["signal"]
-    with session_scope() as session:
-        request = repo.get_approval_request(session, approval_id)
-        assert request is not None and "APPROVE" not in list(request.allowed_decisions)
-
-
-@pytest.mark.usefixtures("db")
-@pytest.mark.parametrize("status", [JobStatus.CLOSED, JobStatus.EXPIRED])
-async def test_attestation_never_reopens_a_closed_or_expired_posting(
-    stub_temporal: _StubTemporal, status: JobStatus
-) -> None:
-    approval_id = _seed_approval(
-        allowed=_GATED, status=ApprovalRequestStatus.PENDING, verification=status
-    )
-    async with _client() as client:
-        response = await client.post(
-            f"/v1/approvals/{approval_id}/decisions",
-            json={
-                "decision": "APPROVE",
-                "reason": "I insist",
-                "decision_version": 1,
-                "attestation": _ATTESTED,
-            },
-        )
-    assert response.status_code == 400
-    assert stub_temporal.signals == []
-
-
-@pytest.mark.usefixtures("db")
-async def test_attestation_needs_the_pinned_verification(
-    stub_temporal: _StubTemporal,
-) -> None:
-    approval_id = _seed_approval(allowed=_GATED, status=ApprovalRequestStatus.PENDING)
-    async with _client() as client:
-        response = await client.post(
-            f"/v1/approvals/{approval_id}/decisions",
-            json={
-                "decision": "APPROVE",
-                "reason": "fits",
-                "decision_version": 1,
-                "attestation": _ATTESTED,
-            },
-        )
-    assert response.status_code == 400
-    assert stub_temporal.signals == []
-
-
-@pytest.mark.usefixtures("db")
-async def test_attestation_shape_is_enforced_at_the_boundary(
-    stub_temporal: _StubTemporal,
-) -> None:
-    approval_id = _seed_approval(
-        allowed=_GATED, status=ApprovalRequestStatus.PENDING, verification=JobStatus.UNVERIFIED
-    )
-    url = f"/v1/approvals/{approval_id}/decisions"
-    bodies = [
-        {"decision": "APPROVE", "attestation": {"observed_open": False, "note": "n"}},
-        {"decision": "APPROVE", "attestation": {"observed_open": True, "note": ""}},
-        {"decision": "REJECT", "attestation": _ATTESTED},
-    ]
-    async with _client() as client:
-        for body in bodies:
-            response = await client.post(url, json={"reason": "r", "decision_version": 1, **body})
-            assert response.status_code == 422, body
-    assert stub_temporal.signals == []
-
-
-@pytest.mark.usefixtures("db")
-async def test_attestation_is_refused_when_plain_approve_is_allowed(
-    stub_temporal: _StubTemporal,
-) -> None:
-    """Otherwise the audit log would claim a human signed for an unverified
-    posting that the system had verified OPEN."""
+    """ADR-013 as amended: the stored allowed set is the whole gate. Approving
+    a posting the system could not verify is the reviewer's own verification,
+    derived and recorded by the decision Activity, never typed here."""
 
     approval_id = _seed_approval(
         allowed=[ApprovalDecision.APPROVE, *_GATED],
         status=ApprovalRequestStatus.PENDING,
-        verification=JobStatus.OPEN,
+        verification=JobStatus.UNVERIFIED,
+    )
+    async with _client() as client:
+        response = await client.post(
+            f"/v1/approvals/{approval_id}/decisions",
+            json={"decision": "APPROVE", "reason": "fits", "decision_version": 1},
+        )
+    assert response.status_code == 200 and response.json()["accepted"] is True
+    assert stub_temporal.signals == ["signal"]
+
+
+@pytest.mark.usefixtures("db")
+async def test_decision_outside_the_stored_allowed_set_is_refused(
+    stub_temporal: _StubTemporal,
+) -> None:
+    """The set was computed against the pinned verification when the request
+    was created; the API neither widens nor recomputes it at decision time."""
+
+    approval_id = _seed_approval(
+        allowed=_GATED, status=ApprovalRequestStatus.PENDING, verification=JobStatus.CLOSED
+    )
+    async with _client() as client:
+        response = await client.post(
+            f"/v1/approvals/{approval_id}/decisions",
+            json={"decision": "APPROVE", "reason": "I insist", "decision_version": 1},
+        )
+    assert response.status_code == 400
+    assert stub_temporal.signals == []
+
+
+@pytest.mark.usefixtures("db")
+async def test_retired_attestation_field_is_rejected_at_the_boundary(
+    stub_temporal: _StubTemporal,
+) -> None:
+    approval_id = _seed_approval(
+        allowed=[ApprovalDecision.APPROVE, *_GATED],
+        status=ApprovalRequestStatus.PENDING,
+        verification=JobStatus.UNVERIFIED,
     )
     async with _client() as client:
         response = await client.post(
@@ -396,19 +339,21 @@ async def test_attestation_is_refused_when_plain_approve_is_allowed(
                 "decision": "APPROVE",
                 "reason": "fits",
                 "decision_version": 1,
-                "attestation": _ATTESTED,
+                "attestation": {"observed_open": True, "note": "form loaded"},
             },
         )
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert stub_temporal.signals == []
 
 
 @pytest.mark.usefixtures("db")
-async def test_attested_decision_replay_compares_the_attestation(
+async def test_decision_replay_compares_decision_reason_and_actor(
     stub_temporal: _StubTemporal,
 ) -> None:
     approval_id = _seed_approval(
-        allowed=_GATED, status=ApprovalRequestStatus.PENDING, verification=JobStatus.UNVERIFIED
+        allowed=[ApprovalDecision.APPROVE, *_GATED],
+        status=ApprovalRequestStatus.PENDING,
+        verification=JobStatus.UNVERIFIED,
     )
     with session_scope() as session:
         repo.record_decision(
@@ -418,20 +363,17 @@ async def test_attested_decision_replay_compares_the_attestation(
             reason="fits",
             actor="admin",
             decision_version=1,
-            attested_open=True,
-            attestation_note=_ATTESTED_NOTE,
+            approved_without_official_open=True,
         )
     url = f"/v1/approvals/{approval_id}/decisions"
     base = {"decision": "APPROVE", "reason": "fits", "decision_version": 1}
     async with _client() as client:
-        replay = await client.post(url, json={**base, "attestation": _ATTESTED})
-        unattested = await client.post(url, json=base)
-        other_note = await client.post(
-            url, json={**base, "attestation": {"observed_open": True, "note": "different"}}
-        )
+        replay = await client.post(url, json=base)
+        other_reason = await client.post(url, json={**base, "reason": "different"})
+        other_actor = await client.post(url, json={**base, "actor": "someone-else"})
     assert replay.status_code == 200
-    assert unattested.status_code == 409
-    assert other_note.status_code == 409
+    assert other_reason.status_code == 409
+    assert other_actor.status_code == 409
     assert stub_temporal.signals == []
 
 

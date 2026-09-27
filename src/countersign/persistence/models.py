@@ -148,10 +148,13 @@ class HumanDecisionRow(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     actor: Mapped[str] = mapped_column(String(128), nullable=False)
     decision_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    # ADR-013: the reviewer signed for an unverified posting themselves.
-    # The note is the evidence they saw; it is also the audit event's reason.
-    attested_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    attestation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ADR-013 as amended (2026-09-27): APPROVE while the verification pinned
+    # to the request was not OPEN — the reviewer's own verification, derived
+    # by the decision Activity from stored records, never typed. Also written
+    # as the `human.verification_attested` audit event.
+    approved_without_official_open: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

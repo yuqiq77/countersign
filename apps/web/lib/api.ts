@@ -131,19 +131,13 @@ export async function createCase(
   return res.json();
 }
 
-// The reviewer's own observation that the posting is open (ADR-013). It is
-// sent only with APPROVE on a posting the system could not verify; the
-// server re-checks the gate with it and audits it separately.
-export interface Attestation {
-  observed_open: true;
-  note: string;
-}
-
+// Nothing beyond the decision and its reason is typed (ADR-013 as amended):
+// approving a posting the system did not verify is recorded server-side as
+// the reviewer's own verification.
 export async function submitDecision(
   approvalRequestId: string,
   decision: string,
   reason: string,
-  attestation?: Attestation,
 ): Promise<void> {
   const res = await fetch(
     `${API_BASE}/v1/approvals/${approvalRequestId}/decisions`,
@@ -155,7 +149,6 @@ export async function submitDecision(
         reason,
         decision_version: 1,
         actor: "admin",
-        ...(attestation ? { attestation } : {}),
       }),
     },
   );

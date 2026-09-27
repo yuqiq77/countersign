@@ -667,17 +667,19 @@ def record_decision(
     reason: str,
     actor: str,
     decision_version: int,
-    attested_open: bool = False,
-    attestation_note: str | None = None,
+    approved_without_official_open: bool = False,
 ) -> bool:
     """Record a human decision; an identical (request, version) replay no-ops.
 
     Returns True when the decision was applied, False when it was a
     duplicate delivery. A replay whose content differs from the recorded
     decision raises DecisionConflictError — it must never be silently
-    reported as accepted. An attested decision (ADR-013) also appends its
-    own audit event in the same transaction, so "a human signed for an
-    unverified posting" is a searchable fact, not a column to remember.
+    reported as accepted. `approved_without_official_open` is derived by
+    the caller from the verification pinned to the request (ADR-013 as
+    amended): an APPROVE while that verification was not OPEN is the
+    reviewer's own verification, kept on the row and appended as the
+    `human.verification_attested` audit event with the decision reason in
+    the same transaction, so the fact stays searchable.
     """
 
     request = session.get(ApprovalRequestRow, approval_request_id)
@@ -690,8 +692,6 @@ def record_decision(
             existing.decision == decision.value
             and existing.reason == reason
             and existing.actor == actor
-            and existing.attested_open == attested_open
-            and existing.attestation_note == attestation_note
         ):
             return False
         raise DecisionConflictError(
@@ -705,14 +705,13 @@ def record_decision(
             reason=reason,
             actor=actor,
             decision_version=decision_version,
-            attested_open=attested_open,
-            attestation_note=attestation_note,
+            approved_without_official_open=approved_without_official_open,
             created_at=utcnow(),
         )
     )
     request.status = ApprovalRequestStatus.DECIDED.value
     request.decided_at = utcnow()
-    if attested_open:
+    if approved_without_official_open:
         append_audit(
             session,
             audit_id=f"aud-attest-{decision_id}",
@@ -721,7 +720,7 @@ def record_decision(
             action="human.verification_attested",
             resource_type="approval_request",
             resource_id=approval_request_id,
-            reason=attestation_note,
+            reason=reason,
         )
     append_audit(
         session,

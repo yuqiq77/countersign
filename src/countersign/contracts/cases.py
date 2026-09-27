@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from countersign.contracts.base import ContractModel, JsonBoundaryModel
 from countersign.contracts.enums import (
@@ -99,44 +99,22 @@ class CaseDetail(ContractModel):
     in_flight: bool
 
 
-class Attestation(JsonBoundaryModel):
-    """The reviewer's own observation that the posting accepts applications.
-
-    It lets APPROVE pass the lifecycle gate on a posting the system could
-    not verify (ADR-013). It is a human decision, recorded and audited on
-    its own; it never overrides a CLOSED or EXPIRED verification, and the
-    note is what the reviewer saw, not a free-form reason.
-    """
-
-    observed_open: bool = Field(strict=True)
-    note: str = Field(min_length=1, max_length=4000)
-
-    @model_validator(mode="after")
-    def _states_open(self) -> "Attestation":
-        if not self.observed_open:
-            raise ValueError("an attestation must state observed_open: true")
-        return self
-
-
 class ApprovalDecisionRequest(JsonBoundaryModel):
     """A durable human decision submitted against an approval request.
 
     JSON-boundary model: FastAPI validates the parsed body in Python mode,
     so the enum stays lax while `decision_version` is strict — a quoted
-    number like "1" is rejected, never coerced.
+    number like "1" is rejected, never coerced. Nothing else is typed to
+    approve: an APPROVE on a posting the system did not verify is recorded
+    as the reviewer's own verification by the decision Activity (ADR-013
+    as amended), so a body carrying the retired `attestation` field is an
+    unknown key.
     """
 
     decision: ApprovalDecision
     reason: str = Field(min_length=1, max_length=4000)
     decision_version: int = Field(ge=1, strict=True)
     actor: str = Field(default="admin", min_length=1, max_length=128)
-    attestation: Attestation | None = None
-
-    @model_validator(mode="after")
-    def _attestation_only_with_approve(self) -> "ApprovalDecisionRequest":
-        if self.attestation is not None and self.decision != ApprovalDecision.APPROVE:
-            raise ValueError("an attestation only accompanies APPROVE")
-        return self
 
 
 class ApprovalDecisionResponse(ContractModel):

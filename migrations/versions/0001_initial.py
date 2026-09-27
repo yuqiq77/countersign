@@ -119,8 +119,7 @@ def upgrade() -> None:
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("actor", sa.String(128), nullable=False),
         sa.Column("decision_version", sa.Integer(), nullable=False),
-        sa.Column("attested_open", sa.Boolean(), nullable=False),
-        sa.Column("attestation_note", sa.Text(), nullable=True),
+        sa.Column("approved_without_official_open", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint(
             "approval_request_id", "decision_version", name="uq_decision_request_version"

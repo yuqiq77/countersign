@@ -73,33 +73,27 @@ def test_json_boundary_models_keep_numeric_strictness() -> None:
     assert accepted.decision_version == 1
 
 
-def test_attestation_must_state_observed_open_and_only_accompanies_approve() -> None:
-    from countersign.contracts.cases import ApprovalDecisionRequest, Attestation
+def test_decision_request_rejects_the_retired_attestation_field() -> None:
+    """ADR-013 as amended: nothing is typed to approve a posting the system
+    did not verify; the old field is an unknown key at the boundary, not a
+    silent no-op."""
 
-    with pytest.raises(ValidationError, match="observed_open"):
-        Attestation.model_validate({"observed_open": False, "note": "form loaded"})
-    with pytest.raises(ValidationError):  # bool stays strict at the JSON boundary
-        Attestation.model_validate({"observed_open": "true", "note": "form loaded"})
+    from countersign.contracts.cases import ApprovalDecisionRequest
+    from countersign.contracts.enums import ApprovalDecision
+
     with pytest.raises(ValidationError):
-        Attestation.model_validate({"observed_open": True, "note": "  "})
-    with pytest.raises(ValidationError, match="only accompanies APPROVE"):
         ApprovalDecisionRequest.model_validate(
             {
-                "decision": "REJECT",
-                "reason": "no",
+                "decision": "APPROVE",
+                "reason": "ok",
                 "decision_version": 1,
                 "attestation": {"observed_open": True, "note": "form loaded"},
             }
         )
     accepted = ApprovalDecisionRequest.model_validate(
-        {
-            "decision": "APPROVE",
-            "reason": "ok",
-            "decision_version": 1,
-            "attestation": {"observed_open": True, "note": "form loaded"},
-        }
+        {"decision": "APPROVE", "reason": "ok", "decision_version": 1}
     )
-    assert accepted.attestation is not None and accepted.attestation.note == "form loaded"
+    assert accepted.decision == ApprovalDecision.APPROVE
 
 
 def test_page_readings_stored_with_string_rejections_remain_readable() -> None:

@@ -73,11 +73,6 @@ class DecisionSignal(ContractModel):
     reason: str
     decision_version: int
     actor: str
-    # Human attestation (ADR-013): the reviewer observed the posting open
-    # themselves; the API has already re-checked the gate with it. Old
-    # histories lack these fields.
-    attested_open: bool = False
-    attestation_note: str | None = None
 
 
 class CaseStateNote(ContractModel):

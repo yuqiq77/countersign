@@ -349,17 +349,18 @@ async def test_provider_outage_during_verify_is_retried_not_recorded(
 
 
 @pytest.mark.usefixtures("db", "fake_network")
-async def test_attested_approval_of_an_unverified_posting_is_recorded_once(
+async def test_approval_of_an_unverified_posting_is_recorded_once_as_the_reviewers_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ADR-013 end to end: the unscripted reader leaves the posting UNVERIFIED,
-    the approval offers no plain APPROVE, and a reviewer's attested APPROVE
-    lands as one decision plus one separate attestation audit event, even
-    when the Signal is delivered twice."""
+    """ADR-013 as amended, end to end: the unscripted reader leaves the posting
+    UNVERIFIED, the approval still offers APPROVE, and the reviewer's plain
+    APPROVE lands as one decision flagged as approved without an official
+    OPEN plus one `human.verification_attested` audit event carrying the
+    decision reason, even when the Signal is delivered twice."""
 
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: FakeEvaluationProvider())
     queue = f"e2e-{uuid.uuid4()}"
-    note = "application form loaded and accepted input today"
+    reason = "fits; the application form accepted input today"
     async with await time_skipping_env() as env:
         async with Worker(
             env.client,
@@ -377,15 +378,13 @@ async def test_attested_approval_of_an_unverified_posting_is_recorded_once(
                 assert verification.status == JobStatus.UNVERIFIED
                 approval = repo.approval_for_case(session, status.case_id)
                 assert approval is not None
-                assert "APPROVE" not in list(approval.allowed_decisions)
+                assert "APPROVE" in list(approval.allowed_decisions)
             signal = DecisionSignal(
                 approval_request_id=status.approval_request_id,
                 decision=ApprovalDecision.APPROVE,
-                reason="fits; applying anyway",
+                reason=reason,
                 decision_version=1,
                 actor="admin",
-                attested_open=True,
-                attestation_note=note,
             )
             await handle.signal(JobIntelligenceWorkflow.submit_decision, signal)
             await handle.signal(JobIntelligenceWorkflow.submit_decision, signal)
@@ -395,8 +394,7 @@ async def test_attested_approval_of_an_unverified_posting_is_recorded_once(
     with session_scope() as session:
         decisions = list(session.scalars(select(HumanDecisionRow)))
         assert len(decisions) == 1
-        assert decisions[0].attested_open is True
-        assert decisions[0].attestation_note == note
+        assert decisions[0].approved_without_official_open is True
         attested = list(
             session.scalars(
                 select(AuditEventRow).where(
@@ -405,7 +403,7 @@ async def test_attested_approval_of_an_unverified_posting_is_recorded_once(
                 )
             )
         )
-        assert len(attested) == 1 and attested[0].reason == note
+        assert len(attested) == 1 and attested[0].reason == reason
 
 
 @pytest.mark.usefixtures("db", "fake_network")
