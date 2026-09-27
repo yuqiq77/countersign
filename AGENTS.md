@@ -121,11 +121,15 @@ them.
   own round's approval Signal from its first event. "In flight" is
   computed by the server from stored records (`repo.in_flight`); do not
   reintroduce a client-side state list.
-- **The approval gate is server-owned** (ADR-013). `APPROVE` on an
-  unverified posting needs a typed human attestation, re-checked by the
-  API against the verification pinned to the request. Do not widen the
-  gate in the UI, infer an apply entry in code to avoid it, or let an
-  attestation reopen a `CLOSED`/`EXPIRED` verification.
+- **The approval gate is server-owned** (ADR-013, amended 2026-09-27).
+  `APPROVE` is offered on any verification pinned to the request that is
+  not `CLOSED`/`EXPIRED`; approving a posting the system did not verify
+  `OPEN` is recorded by the decision Activity as the reviewer's own
+  verification (row flag plus the `human.verification_attested` audit
+  event), derived from the pinned verification, never typed. Do not add a
+  checkbox, note or decision-time recompute back, do not widen or narrow
+  the stored set in the UI, and do not infer an apply entry in code. The
+  model's `APPLY_NOW` framing stays gated on `OPEN` (`gated_decision`).
 - **Import boundaries are enforced by import-linter**: `contracts` imports
   nothing internal; `workflows` imports only `contracts` and `domain`;
   `domain` imports only `contracts`. Workflow code reaches Activities only

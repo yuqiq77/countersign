@@ -121,10 +121,11 @@ Implemented (Slice 1 — one durable case):
   response, authority and evidence. Without a completed reading there is
   no inferred apply entry; HTTP 200 alone never proves OPEN. Chromium
   rendering records actual navigation metadata;
-- a code-enforced approval gate: a plain APPROVE needs a verified official
-  OPEN; on an unverified posting the reviewer may approve only with a typed
-  attestation of what they saw, re-checked by the API and audited as its
-  own human event (ADR-013);
+- separate system-recommendation and human-approval gates: the system's
+  APPLY_NOW framing needs verified official OPEN; a pending approval
+  permits APPROVE when its pinned verification is not CLOSED/EXPIRED.
+  Approval without official OPEN is recorded as the reviewer's own
+  verification with its own audit event (ADR-013, amended);
 - an evidence loop: "add context and re-evaluate" records the reviewer's
   note as their decision and continues the same workflow into the next
   round, which re-verifies the posting and re-evaluates with the note as

@@ -84,3 +84,58 @@ an observation.
   attestation.
 - ATS adapters or an official-domain mapping make `UNVERIFIED` rare
   enough that attestation volume itself becomes a signal.
+
+## Amendment (2026-09-27, after the Slice 1 live set)
+
+The typed attestation asked the reviewer to prove to the system something
+the system cannot use: nothing downstream consumed `attested_open` except
+the audit log, and the system submits no application. Live volume also
+inverted this ADR's expectation that `UNVERIFIED` would be rare: 29 of
+the first 38 verifications were not `OPEN` (board postings and company
+pages the authority rules cannot make official), so the attestation was
+the ordinary path rather than the exception. At the round cap, a board
+posting could still be approved with an attestation, but required the
+extra checkbox and observation note; only REQUEST_EVIDENCE was removed.
+
+Two gates exist in `domain/gates.py`; only one changes.
+
+- `gated_decision`, the system's own framing, is unchanged: the model's
+  `APPLY_NOW` is downgraded unless the pinned verification is `OPEN`. The
+  rule "never infer open from HTTP 200" and the claim behind it (v4 §12,
+  §25) stand.
+- `allowed_decisions_for`, what the reviewer may do, no longer takes an
+  attestation. `APPROVE` is offered whenever the request pins a
+  verification that is not `CLOSED` or `EXPIRED`. Because the workflow
+  ends those cases before approval and always pins a verification, every
+  pending approval in practice accepts `APPROVE`; the two remaining checks
+  are guards, not a path. They are not to be extended "for safety".
+- A convention replaces the typed proof: **approving a posting the system
+  did not verify as an official `OPEN` is the reviewer's own
+  verification.** The decision Activity derives that fact from the
+  verification pinned to the request, never from the Signal or the
+  request body, records it on the decision row
+  (`approved_without_official_open`) and appends the
+  `human.verification_attested` audit event with the decision reason in
+  the same transaction. ADR-005's "actor, reason, and exact evidence
+  reviewed" is met by the actor, the decision reason and the request's
+  pinned verification and snapshot.
+- Removed: the `Attestation` contract and request field, the API's
+  recompute of the allowed set and its refusal of an attestation on a
+  verified posting, the Signal's attestation fields, the note column, and
+  the web client's checkbox, note and separate button. The case page
+  states the convention in one line under the decision buttons whenever
+  the pinned verification is not `OPEN`.
+- This is an incompatible development cutover: migration 0001 is edited
+  in place, and both the business database and Temporal history must be
+  reset before running the new image. The owner completed that cutover
+  on 2026-09-27 after privately exporting the business records. Read-only
+  checks confirmed the new decision column, the worker's reduced Signal
+  contract and empty business/workflow stores. Old Temporal history was
+  not retained; deployment confirmation is not a live approval test.
+
+Consequence kept: approvals without an official `OPEN` remain countable
+and reviewable as the labelled disagreement data of v4 §17, now without
+depending on whether a reviewer ticked a box. Consequence dropped: "no
+evidence → a human must sign for it". The gate's meaning is now that the
+system never frames a posting as apply-now on its own, and the human's
+approval carries the human's responsibility, recorded.
