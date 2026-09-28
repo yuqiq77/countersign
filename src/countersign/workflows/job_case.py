@@ -35,6 +35,7 @@ _RETRY = RetryPolicy(
     maximum_attempts=4,
     non_retryable_error_types=[
         "FetchPolicyError",
+        "PolicyError",
         "ContractFailure",
         "MissingApproval",
         "DecisionConflict",

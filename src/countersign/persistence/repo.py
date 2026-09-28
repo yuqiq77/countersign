@@ -21,7 +21,7 @@ from countersign.contracts.enums import (
     SourceAuthority,
 )
 from countersign.contracts.evaluation import EvaluationRecord
-from countersign.contracts.page_reading import PageReadingRecord
+from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
 from countersign.domain.gates import MAX_GENERATIONS
@@ -262,23 +262,35 @@ def get_snapshot(session: Session, snapshot_id: str) -> SnapshotRecord | None:
     return None if row is None else _snapshot_record(row)
 
 
-def body_snapshot(session: Session, case_id: str) -> SnapshotRecord | None:
-    """The observation the latest reading identified as the posting body.
+def body_observation(
+    session: Session, case_id: str
+) -> tuple[SnapshotRecord | None, ObservationRef | None]:
+    """The posting body: the latest reading's body observation with its snapshot.
 
-    Falls back to the latest snapshot before any reading exists. Every
-    consumer of "the posting" (evaluation, approval pinning, the case
-    detail) goes through here, so none of them shows a followed apply page
-    or a rendered copy that merely happened to be stored last.
+    Falls back to the latest snapshot alone (no reference) before any
+    reading exists or when the reference's snapshot is missing, so a
+    reading's authority is never stamped onto a snapshot it did not
+    classify. Every consumer of "the posting" (evaluation, approval
+    pinning, the case detail) goes through here, so none of them shows a
+    followed apply page or a rendered copy that merely happened to be
+    stored last. The reference carries the authority the reading gave the
+    observation (ticket 002), which a reused snapshot's own stamp may
+    predate; it is None on readings written before that was recorded.
     """
 
     reading = latest_page_reading(session, case_id)
-    if reading is not None:
-        ref = next((r for r in reading.observations if r.index == reading.body_observation), None)
-        if ref is not None and ref.snapshot_id is not None:
-            chosen = get_snapshot(session, ref.snapshot_id)
-            if chosen is not None:
-                return chosen
-    return latest_snapshot(session, case_id)
+    ref = reading.body_ref() if reading is not None else None
+    if ref is not None and ref.snapshot_id is not None:
+        chosen = get_snapshot(session, ref.snapshot_id)
+        if chosen is not None:
+            return chosen, ref
+    return latest_snapshot(session, case_id), None
+
+
+def body_snapshot(session: Session, case_id: str) -> SnapshotRecord | None:
+    """The posting body snapshot alone; see `body_observation`."""
+
+    return body_observation(session, case_id)[0]
 
 
 def _snapshot_record(row: SourceSnapshotRow) -> SnapshotRecord:
@@ -320,6 +332,12 @@ def record_page_reading(session: Session, record: PageReadingRecord) -> str:
         )
     )
     return record.reading_id
+
+
+def get_page_reading(session: Session, reading_id: str) -> PageReadingRecord | None:
+    row = session.get(PageReadingRow, reading_id)
+    # Self-produced JSON boundary: enums and datetimes come back as strings.
+    return None if row is None else PageReadingRecord.model_validate(row.payload, strict=False)
 
 
 def latest_page_reading(session: Session, case_id: str) -> PageReadingRecord | None:
@@ -369,7 +387,10 @@ def _verification_result(row: VerificationRow) -> VerificationResult:
         case_id=row.case_id,
         status=JobStatus(row.status),
         authority=SourceAuthority(row.authority),
-        checked_at=row.checked_at,
+        # SQLite hands back naive datetimes; the contract is timezone-aware,
+        # and a stored result returned to a retried Activity must equal the
+        # one the first attempt returned.
+        checked_at=ensure_utc(row.checked_at),
         http_status=row.http_status,
         final_url=row.final_url,
         reason=row.reason,

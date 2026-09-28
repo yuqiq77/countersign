@@ -1,5 +1,6 @@
 """Versioned contracts shared across API, workflows, Activities, and persistence."""
 
+from countersign.contracts.authority_policy import OfficialHostEntry, OfficialHostMapping
 from countersign.contracts.base import ContractModel, JsonBoundaryModel
 from countersign.contracts.cases import (
     ApprovalDecisionRequest,
@@ -79,6 +80,8 @@ __all__ = [
     "ModelEvaluation",
     "ModelUsage",
     "NormalizeOutcome",
+    "OfficialHostEntry",
+    "OfficialHostMapping",
     "Relevance",
     "RiskFlag",
     "SalaryExtraction",

@@ -10,6 +10,7 @@ from countersign.contracts.enums import (
     ApprovalRequestStatus,
     CaseState,
     EvalDecision,
+    SourceAuthority,
 )
 from countersign.contracts.evaluation import EvaluationRecord
 from countersign.contracts.provenance import SnapshotRecord
@@ -86,6 +87,11 @@ class CaseDetail(ContractModel):
     created_at: datetime
     updated_at: datetime
     snapshot: SnapshotRecord | None
+    # The authority the reading gave the posting body (ticket 002). The
+    # snapshot keeps its retrieval-time stamp untouched; a reused snapshot's
+    # stamp can predate the official-host mapping. None before any reading
+    # or on readings written before it was recorded.
+    posting_authority: SourceAuthority | None = None
     verification: VerificationResult | None
     evaluation: EvaluationRecord | None
     gated_decision: EvalDecision | None

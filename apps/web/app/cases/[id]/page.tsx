@@ -155,7 +155,9 @@ export default function CaseDetailPage() {
           <h2 className="mb-2 font-medium text-neutral-300">Provenance</h2>
           {detail.snapshot ? (
             <dl className="space-y-1 text-neutral-400">
-              <div>Authority: {detail.snapshot.authority_level}</div>
+              <div>
+                Authority: {detail.posting_authority ?? detail.snapshot.authority_level}
+              </div>
               <div>HTTP: {detail.snapshot.http_status}</div>
               <div>Hash: {detail.snapshot.content_hash.slice(0, 16)}…</div>
               <div>

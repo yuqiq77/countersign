@@ -83,6 +83,9 @@ export interface CaseDetail {
     content_hash: string;
     retrieved_at: string;
   } | null;
+  // The authority the reading gave the posting body; the snapshot keeps its
+  // retrieval-time stamp. Null before any reading.
+  posting_authority: string | null;
   verification: {
     status: string;
     authority: string;

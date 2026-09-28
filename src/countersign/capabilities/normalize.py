@@ -6,6 +6,8 @@ is versioned so results are reproducible (v4 §12).
 
 import hashlib
 import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, cast
@@ -174,18 +176,77 @@ def normalize_html(body: bytes) -> Normalized:
     )
 
 
-def classify_authority(url: str) -> SourceAuthority:
-    """Slice-1 heuristic authority classification by host and path.
+_HOST_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_HOSTNAME = re.compile(rf"^{_HOST_LABEL}(?:\.{_HOST_LABEL})*$")
 
-    Conservative on purpose: unknown hosts are COMPANY_CONTROLLED, never
-    OFFICIAL_*; aggregators are DISCOVERY_ONLY. A path that merely looks
+
+def _idna(host: str) -> str:
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError(f"not a valid hostname: {host!r}") from exc
+
+
+def host_of(url: str) -> str:
+    """The URL's hostname as the authority rules compare it.
+
+    Lower-case, no trailing dot, IDNA-encoded (the fetcher reports final
+    URLs in punycode), so a configured host and an observed host meet in
+    one form.
+    """
+
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    try:
+        return _idna(host)
+    except ValueError:
+        return host
+
+
+def normalize_host(value: str) -> str:
+    """A configured hostname in the form `host_of` produces, or ValueError.
+
+    Bare host only: labels of letters, digits and hyphens joined by dots,
+    IDNA-encoded. No scheme, port, path, userinfo, whitespace or wildcard
+    characters, so an entry can never be mistaken for a pattern.
+    """
+
+    host = _idna(value.strip().lower().rstrip("."))
+    if not _HOSTNAME.match(host):
+        raise ValueError(f"not a bare hostname: {value!r}")
+    return host
+
+
+def _under(host: str, hosts: tuple[str, ...]) -> bool:
+    """Whether `host` is one of `hosts` or a subdomain of one."""
+
+    return any(host == h or host.endswith("." + h) for h in hosts)
+
+
+def is_shared_host(host: str) -> bool:
+    """Known application-system vendor or discovery hosts: never a company entry."""
+
+    return _under(host, (*_ATS_HOSTS, *_DISCOVERY_HOSTS))
+
+
+def classify_authority(
+    url: str, official_hosts: Mapping[str, str] | None = None
+) -> SourceAuthority:
+    """Authority classification by host (ADR-005).
+
+    Conservative on purpose: known ATS hosts are OFFICIAL_ATS; a host the
+    operator declared official is OFFICIAL_COMPANY on an exact match of
+    the normalized hostname, with no wildcards, registrable-domain guesses
+    or path rules (ticket 002); aggregators are DISCOVERY_ONLY; every other
+    host is COMPANY_CONTROLLED, never OFFICIAL_*. A path that merely looks
     like a careers page ("/jobs/...") proves nothing about the host and
     must never elevate authority — OFFICIAL_* gates the apply-now framing.
     """
 
-    host = (urlparse(url).hostname or "").lower()
-    if any(host == ats or host.endswith("." + ats) for ats in _ATS_HOSTS):
+    host = host_of(url)
+    if _under(host, _ATS_HOSTS):
         return SourceAuthority.OFFICIAL_ATS
-    if any(host == d or host.endswith("." + d) for d in _DISCOVERY_HOSTS):
+    if official_hosts and host in official_hosts:
+        return SourceAuthority.OFFICIAL_COMPANY
+    if _under(host, _DISCOVERY_HOSTS):
         return SourceAuthority.DISCOVERY_ONLY
     return SourceAuthority.COMPANY_CONTROLLED

@@ -9,6 +9,7 @@ Failure paths run against the real state machine — no mocked quarantine.
 import uuid
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import httpx
 import pytest
@@ -711,3 +712,310 @@ async def test_reader_follows_a_company_page_to_its_ats_posting(
         assert evaluation is not None
         approval = repo.approval_for_case(session, status.case_id)
         assert approval is not None and "APPROVE" in list(approval.allowed_decisions)
+
+
+# --- ticket 002: official company hosts, and the retry that returns the stored result ---
+
+COMPANY_APPLY_URL = "https://careers.acme.example/roles/1"
+COMPANY_APPLY_HTML = b"""
+<html><body>
+  <h1>Platform Engineer</h1>
+  <p>Build the platform. Apply below.</p>
+  <a href="/roles/1/apply">Apply now</a>
+</body></html>
+"""
+
+
+def _company_provider() -> FakeEvaluationProvider:
+    return FakeEvaluationProvider(
+        page_steps=[
+            PageStep(
+                action=ReaderAction.DONE,
+                why="apply control on the company page",
+                reading=PageReading(
+                    body_observation=0,
+                    apply_entry=ApplyEntry(
+                        kind=ApplyEntryKind.APPLY_CONTROL,
+                        cited_text="Apply now",
+                        observation=0,
+                        href="https://careers.acme.example/roles/1/apply",
+                    ),
+                ),
+            )
+        ]
+    )
+
+
+@pytest.mark.usefixtures("db", "fake_network")
+def test_retried_verify_after_commit_returns_the_stored_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry after the commit, before Temporal saw the completion, hands
+    the workflow the record the database holds — text length included, so
+    the empty-body branch is unchanged — and reads nothing again."""
+
+    from countersign.domain import ids
+    from countersign.persistence.models import PageReadingRow
+
+    fetches: list[str] = []
+    real_fetch = case_activities.fetch_url
+
+    def counting_fetch(url: str, **kwargs: object) -> FetchResult:
+        fetches.append(url)
+        return real_fetch(url, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(case_activities, "fetch_url", counting_fetch)
+    case_id = str(uuid.uuid4())
+    payload = CaseWorkflowInput(case_id=case_id, url=JOB_URL)
+    case_activities.snapshot_source(payload)
+    case_activities.normalize_case(payload)
+    first = case_activities.verify_status(payload)
+    assert first.observed_text_chars is not None and first.observed_text_chars > 0
+    fetched_once = len(fetches)
+
+    again = case_activities.verify_status(payload)
+    assert again == first
+    assert len(fetches) == fetched_once
+    with session_scope() as session:
+        readings = list(
+            session.scalars(select(PageReadingRow).where(PageReadingRow.case_id == case_id))
+        )
+        assert len(readings) == 1
+        reading = repo.get_page_reading(session, ids.reading_id(case_id, 1))
+        assert reading is not None and reading.body_text_chars == first.observed_text_chars
+        # A reading written before the field existed: the length is
+        # recomputed from the body snapshot rather than defaulting to None.
+        readings[0].payload = {**readings[0].payload, "body_text_chars": None}
+    third = case_activities.verify_status(payload)
+    assert third.observed_text_chars == first.observed_text_chars
+    assert third.verification == first.verification
+    assert len(fetches) == fetched_once
+
+
+def _render_unavailable(url: str, body: bytes, timeout: float) -> FetchResult | None:
+    return None
+
+
+@pytest.mark.usefixtures("db")
+def test_retried_verify_of_an_empty_body_still_reports_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def empty_fetch(url: str, **_: object) -> FetchResult:
+        return FetchResult(
+            requested_url=url,
+            final_url=url,
+            http_status=200,
+            content_type="text/html",
+            body=EMPTY_HTML,
+            redirect_chain=[],
+        )
+
+    monkeypatch.setattr(case_activities, "fetch_url", empty_fetch)
+    monkeypatch.setattr(case_activities, "render_url", _render_unavailable)
+    monkeypatch.setenv("COUNTERSIGN_MODEL_PROVIDER", "fake")
+    case_id = str(uuid.uuid4())
+    payload = CaseWorkflowInput(case_id=case_id, url=JOB_URL)
+    case_activities.snapshot_source(payload)
+    case_activities.normalize_case(payload)
+    first = case_activities.verify_status(payload)
+    assert first.observed_text_chars == 0
+    again = case_activities.verify_status(payload)
+    assert again.observed_text_chars == 0
+    assert again.verification == first.verification
+
+
+@pytest.mark.usefixtures("db")
+async def test_mapped_company_host_reaches_official_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ticket 002 end to end: a page on a host the operator declared official
+    is OFFICIAL_COMPANY at intake and in the reading, OPEN with a cited apply
+    control, and the reading records the mapping it used; the same page with
+    no mapping stays OPEN_THIRD_PARTY_ONLY."""
+
+    from countersign.domain import ids
+    from countersign.policy.official_hosts import OFFICIAL_HOSTS_PATH_VAR
+
+    mapping = tmp_path / "official-hosts.json"
+    mapping.write_text(
+        '{"version": "e2e-1", "entries": [{"host": "careers.acme.example", "company": "acme"}]}'
+    )
+    monkeypatch.setenv(OFFICIAL_HOSTS_PATH_VAR, str(mapping))
+
+    def fetch(url: str, **_: object) -> FetchResult:
+        return FetchResult(
+            requested_url=url,
+            final_url=url,
+            http_status=200,
+            content_type="text/html",
+            body=COMPANY_APPLY_HTML,
+            redirect_chain=[],
+        )
+
+    monkeypatch.setattr(case_activities, "fetch_url", fetch)
+    monkeypatch.setattr(case_activities, "resolve_provider", _company_provider)
+    monkeypatch.setenv("COUNTERSIGN_MODEL_PROVIDER", "fake")
+
+    queue = f"e2e-{uuid.uuid4()}"
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=list(ALL_ACTIVITIES),
+            activity_executor=ThreadPoolExecutor(4),
+        ):
+            handle = await start_case(env, queue, url=COMPANY_APPLY_URL)
+            status = await wait_for_pending_approval(handle)
+
+    with session_scope() as session:
+        verification = repo.latest_verification(session, status.case_id)
+        assert verification is not None
+        assert verification.status == JobStatus.OPEN
+        assert verification.authority == SourceAuthority.OFFICIAL_COMPANY
+        snapshot = repo.body_snapshot(session, status.case_id)
+        assert snapshot is not None and snapshot.authority_level == SourceAuthority.OFFICIAL_COMPANY
+        reading = repo.get_page_reading(session, ids.reading_id(status.case_id, 1))
+        assert reading is not None
+        assert reading.observations[0].authority == SourceAuthority.OFFICIAL_COMPANY
+        assert reading.observations[0].official_host_entry == "acme"
+        assert reading.authority_policy_version == "e2e-1"
+        assert reading.authority_policy_fingerprint is not None
+        assert len(reading.authority_policy_fingerprint) == 8
+        assert reading.body_text_chars is not None and reading.body_text_chars > 0
+        body_snapshot, body_ref = repo.body_observation(session, status.case_id)
+        assert body_snapshot is not None and body_snapshot.snapshot_id == snapshot.snapshot_id
+        assert body_ref is not None and body_ref.authority == SourceAuthority.OFFICIAL_COMPANY
+        approval = repo.approval_for_case(session, status.case_id)
+        assert approval is not None and "APPROVE" in list(approval.allowed_decisions)
+
+    # The same page with no mapping configured, through the real Activities.
+    monkeypatch.delenv(OFFICIAL_HOSTS_PATH_VAR)
+    case_id = str(uuid.uuid4())
+    payload = CaseWorkflowInput(case_id=case_id, url=COMPANY_APPLY_URL)
+    case_activities.snapshot_source(payload)
+    case_activities.normalize_case(payload)
+    unmapped = case_activities.verify_status(payload)
+    assert unmapped.verification.status == JobStatus.OPEN_THIRD_PARTY_ONLY
+    assert unmapped.verification.authority == SourceAuthority.COMPANY_CONTROLLED
+    with session_scope() as session:
+        reading = repo.get_page_reading(session, ids.reading_id(case_id, 1))
+        assert reading is not None
+        assert reading.observations[0].authority == SourceAuthority.COMPANY_CONTROLLED
+        assert reading.observations[0].official_host_entry is None
+        assert reading.authority_policy_version is None
+        assert reading.authority_policy_fingerprint is None
+
+
+@pytest.mark.usefixtures("db", "fake_network")
+def test_a_mapping_that_stops_parsing_fails_the_case_without_retries_or_fetches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A file edited into a broken state after worker start is a configuration
+    failure: the Activity raises a non-retryable error before touching the
+    network, so Temporal neither retries nor re-fetches the posting."""
+
+    from temporalio.exceptions import ApplicationError
+
+    from countersign.policy.official_hosts import OFFICIAL_HOSTS_PATH_VAR
+
+    broken = tmp_path / "official-hosts.json"
+    broken.write_text('{"version": "v", "entries": [')
+    monkeypatch.setenv(OFFICIAL_HOSTS_PATH_VAR, str(broken))
+    fetches: list[str] = []
+
+    def counting_fetch(url: str, **_: object) -> FetchResult:
+        fetches.append(url)
+        return _fetch_result(url)
+
+    monkeypatch.setattr(case_activities, "fetch_url", counting_fetch)
+    payload = CaseWorkflowInput(case_id=str(uuid.uuid4()), url=JOB_URL)
+    with pytest.raises(ApplicationError) as excinfo:
+        case_activities.snapshot_source(payload)
+    assert excinfo.value.type == "PolicyError" and excinfo.value.non_retryable
+    assert fetches == []
+
+
+@pytest.mark.usefixtures("db", "fake_network")
+def test_verify_returns_what_a_concurrent_attempt_committed_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out attempt Temporal already replaced can still commit while
+    the retry is running. The database keeps the first rows written; the
+    retry must return those, not its own computation, or the workflow and
+    the database would each believe a different status."""
+
+    from countersign.contracts.enums import ObservationHow, ReaderStop
+    from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
+    from countersign.contracts.verification import VerificationResult
+    from countersign.domain import ids
+
+    case_id = str(uuid.uuid4())
+    payload = CaseWorkflowInput(case_id=case_id, url=JOB_URL)
+    case_activities.snapshot_source(payload)
+    case_activities.normalize_case(payload)
+    reading_id = ids.reading_id(case_id, 1)
+    verification_id = ids.verification_id(case_id, 1)
+    real_body_snapshot = repo.body_snapshot
+
+    def other_attempt_commits_first(session: object, cid: str) -> object:
+        # Runs inside this attempt's session block, after its entry check and
+        # before its writes: the earlier attempt lands its rows now.
+        with session_scope() as other:
+            intake = repo.latest_snapshot(other, cid)
+            assert intake is not None
+            repo.record_page_reading(
+                other,
+                PageReadingRecord(
+                    reading_id=reading_id,
+                    case_id=cid,
+                    url=JOB_URL,
+                    observations=[
+                        ObservationRef(
+                            index=0,
+                            source_url=JOB_URL,
+                            how=ObservationHow.STATIC,
+                            http_status=200,
+                            snapshot_id=intake.snapshot_id,
+                            authority=SourceAuthority.COMPANY_CONTROLLED,
+                        )
+                    ],
+                    body_observation=0,
+                    apply_entry=None,
+                    evidence=[],
+                    rejected_claims=[],
+                    steps=[],
+                    stop_reason=ReaderStop.DONE,
+                    prompt_version="page-reader/0.5.0",
+                    usage=None,
+                    read_at=repo.utcnow(),
+                    body_text_chars=7,
+                ),
+            )
+            repo.record_verification(
+                other,
+                verification_id=verification_id,
+                result=VerificationResult(
+                    case_id=cid,
+                    status=JobStatus.OPEN_THIRD_PARTY_ONLY,
+                    authority=SourceAuthority.COMPANY_CONTROLLED,
+                    checked_at=repo.utcnow(),
+                    http_status=200,
+                    final_url=JOB_URL,
+                    reason="the earlier attempt's reading",
+                    apply_markers_found=True,
+                    closed_markers_found=False,
+                    reading_id=reading_id,
+                ),
+            )
+        return real_body_snapshot(session, cid)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(repo, "body_snapshot", other_attempt_commits_first)
+    outcome = case_activities.verify_status(payload)
+    # This attempt read the page as OPEN on an official ATS; the database
+    # holds the other attempt's OPEN_THIRD_PARTY_ONLY, and that is returned.
+    assert outcome.verification.status == JobStatus.OPEN_THIRD_PARTY_ONLY
+    assert outcome.verification.reason == "the earlier attempt's reading"
+    assert outcome.observed_text_chars == 7
+    with session_scope() as session:
+        assert repo.latest_verification(session, case_id) == outcome.verification

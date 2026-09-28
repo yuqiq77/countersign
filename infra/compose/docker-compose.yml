@@ -97,6 +97,9 @@ services:
       # under the image's working directory (/app), so the documented value
       # config/operator/<file>.md resolves on the host and in the worker alike.
       COUNTERSIGN_OPERATOR_PROFILE_PATH: ${COUNTERSIGN_OPERATOR_PROFILE_PATH:-}
+      # Official-host mapping (ticket 002), same convention: a JSON file under
+      # config/operator/, blank means no mapping. See config/official-hosts.example.json.
+      COUNTERSIGN_OFFICIAL_HOSTS_PATH: ${COUNTERSIGN_OFFICIAL_HOSTS_PATH:-}
       # The image installs Chromium through Playwright (see Dockerfile) and
       # links it here. Fixed on purpose: a host value in .env names a host
       # binary that does not exist inside the container.

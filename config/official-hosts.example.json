@@ -1,0 +1,8 @@
+{
+  "version": "example-1",
+  "entries": [
+    { "host": "careers.acme.example", "company": "acme" },
+    { "host": "www.acme.example", "company": "acme" },
+    { "host": "jobs.globex.example", "company": "globex" }
+  ]
+}

@@ -476,3 +476,75 @@ async def test_case_detail_exposes_operator_context_and_in_flight(
     async with _client() as client:
         after = (await client.get("/v1/cases/c1")).json()
     assert after["in_flight"] is False
+
+
+@pytest.mark.usefixtures("db")
+async def test_case_detail_shows_the_authority_the_reading_gave_the_body(
+    stub_temporal: _StubTemporal,
+) -> None:
+    """Ticket 002: a reused snapshot's retrieval-time stamp can predate the
+    official-host mapping; the case page shows what the reading decided."""
+
+    from countersign.contracts.enums import ObservationHow, ReaderStop, SourceAuthority
+    from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
+    from countersign.contracts.provenance import SnapshotRecord
+
+    with session_scope() as session:
+        repo.create_case(session, case_id="c1", url=PUBLIC_URL)
+        repo.record_snapshot(
+            session,
+            SnapshotRecord(
+                snapshot_id="snap-1",
+                case_id="c1",
+                canonical_url=PUBLIC_URL,
+                final_url=PUBLIC_URL,
+                source_type="pasted_url",
+                authority_level=SourceAuthority.COMPANY_CONTROLLED,
+                retrieved_at=repo.utcnow(),
+                http_status=200,
+                content_type="text/html",
+                content_hash="abc",
+                raw_object_key="blob-1",
+                extractor_name="html-text",
+                extractor_version="1.2.0",
+                redirect_chain=[],
+            ),
+        )
+        repo.record_page_reading(
+            session,
+            PageReadingRecord(
+                reading_id="read-c1-g1",
+                case_id="c1",
+                url=PUBLIC_URL,
+                observations=[
+                    ObservationRef(
+                        index=0,
+                        source_url=PUBLIC_URL,
+                        how=ObservationHow.STATIC,
+                        http_status=200,
+                        snapshot_id="snap-1",
+                        authority=SourceAuthority.OFFICIAL_COMPANY,
+                        official_host_entry="acme",
+                    )
+                ],
+                body_observation=0,
+                apply_entry=None,
+                evidence=[],
+                rejected_claims=[],
+                steps=[],
+                stop_reason=ReaderStop.DONE,
+                prompt_version="page-reader/0.5.0",
+                usage=None,
+                read_at=repo.utcnow(),
+                authority_policy_version="api-1",
+                authority_policy_fingerprint="0123abcd",
+                body_text_chars=12,
+            ),
+        )
+    async with _client() as client:
+        detail = (await client.get("/v1/cases/c1")).json()
+    assert detail["snapshot"]["snapshot_id"] == "snap-1"
+    # The provenance record keeps its retrieval-time stamp; the reading's
+    # judgment is its own field.
+    assert detail["snapshot"]["authority_level"] == "COMPANY_CONTROLLED"
+    assert detail["posting_authority"] == "OFFICIAL_COMPANY"

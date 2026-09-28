@@ -408,3 +408,73 @@ def test_evaluation_rounds_are_recovered_for_records_written_without_one() -> No
         assert pinned is not None
         assert (pinned.evaluation_id, pinned.generation) == (first.evaluation_id, 1)
         assert repo.pinned_evaluation(session, "appr-c1-g9") is None
+
+
+def test_body_observation_pairs_a_snapshot_only_with_the_reference_that_names_it() -> None:
+    """Ticket 002: a reading's authority is never stamped onto a snapshot it
+    did not classify. When the body reference's snapshot is missing, the
+    fallback is the latest snapshot alone, with no reference."""
+
+    from countersign.contracts.enums import ObservationHow, ReaderStop, SourceAuthority
+    from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
+    from countersign.contracts.provenance import SnapshotRecord
+
+    url = "https://careers.acme.example/roles/1"
+
+    def snapshot(snapshot_id: str) -> SnapshotRecord:
+        return SnapshotRecord(
+            snapshot_id=snapshot_id,
+            case_id="c1",
+            canonical_url=url,
+            final_url=url,
+            source_type="pasted_url",
+            authority_level=SourceAuthority.COMPANY_CONTROLLED,
+            retrieved_at=datetime.now(UTC),
+            http_status=200,
+            content_type="text/html",
+            content_hash="abc",
+            raw_object_key="blob-1",
+            extractor_name="html-text",
+            extractor_version="1.2.0",
+            redirect_chain=[],
+        )
+
+    def reading(reading_id: str, snapshot_id: str | None) -> PageReadingRecord:
+        return PageReadingRecord(
+            reading_id=reading_id,
+            case_id="c1",
+            url=url,
+            observations=[
+                ObservationRef(
+                    index=0,
+                    source_url=url,
+                    how=ObservationHow.STATIC,
+                    http_status=200,
+                    snapshot_id=snapshot_id,
+                    authority=SourceAuthority.OFFICIAL_COMPANY,
+                )
+            ],
+            body_observation=0,
+            apply_entry=None,
+            evidence=[],
+            rejected_claims=[],
+            steps=[],
+            stop_reason=ReaderStop.DONE,
+            prompt_version="page-reader/0.5.0",
+            usage=None,
+            read_at=datetime.now(UTC),
+        )
+
+    with session_scope() as session:
+        repo.create_case(session, case_id="c1", url=url)
+        assert repo.body_observation(session, "c1") == (None, None)
+        repo.record_snapshot(session, snapshot("snap-1"))
+        repo.record_page_reading(session, reading("read-c1-g1", "snap-1"))
+        chosen, ref = repo.body_observation(session, "c1")
+        assert chosen is not None and chosen.snapshot_id == "snap-1"
+        assert ref is not None and ref.authority == SourceAuthority.OFFICIAL_COMPANY
+    with session_scope() as session:
+        repo.record_page_reading(session, reading("read-c1-g2", "snap-missing"))
+        chosen, ref = repo.body_observation(session, "c1")
+        assert chosen is not None and chosen.snapshot_id == "snap-1"
+        assert ref is None

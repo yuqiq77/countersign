@@ -1,6 +1,7 @@
 """Replay a stored observation through the page reader and show the model's step.
 
-    python -m countersign.diagnostics.replay_reading <snapshot_id | case_id> [--navigate]
+    python -m countersign.diagnostics.replay_reading <snapshot_id | case_id> \
+        [--navigate] [--policy PATH]
 
 The stored body is read from the database, never refetched, so the model
 sees exactly the dossier a live run saw. Every step's action and stated
@@ -9,6 +10,12 @@ are printed as JSON. Without `--navigate`, FOLLOW and RENDER are reported
 unavailable, so a replay makes no network request; with it, the real fetch
 and render capabilities run under their usual policy. One replay is one or
 more paid provider calls under the configured provider settings.
+
+A replay is an experiment with the current reader, not a reproduction of
+the stored result; the stored records remain the history. Authority is
+classified without any official-host mapping unless `--policy` names one
+explicitly — the worker's environment is never consulted — and the output
+states which mapping, if any, it used.
 """
 
 import argparse
@@ -27,6 +34,7 @@ from countersign.gateway.provider import StructuredProvider
 from countersign.persistence import repo
 from countersign.persistence.blobstore import DatabaseBlobStore
 from countersign.persistence.db import session_scope
+from countersign.policy.official_hosts import OfficialHostPolicy, load_official_hosts
 
 
 def _no_fetch(url: str, timeout: float) -> FetchResult:
@@ -43,6 +51,7 @@ def replay(
     provider: StructuredProvider | None = None,
     navigate: bool = False,
     config: ReaderConfig | None = None,
+    policy: OfficialHostPolicy | None = None,
 ) -> dict[str, Any]:
     """Run the reader over a stored snapshot (by id) or a case's posting body."""
 
@@ -64,7 +73,7 @@ def replay(
     result = read_page(
         snapshot.canonical_url,
         first=first,
-        authority_of=classify_authority,
+        authority_of=policy.classify if policy is not None else classify_authority,
         fetch=(lambda url, t: fetch_url(url, timeout_seconds=t)) if navigate else _no_fetch,
         render=render_url if navigate else _no_render,
         provider=provider or resolve_provider(),
@@ -79,6 +88,11 @@ def replay(
     return {
         "snapshot_id": snapshot.snapshot_id,
         "url": snapshot.canonical_url,
+        "authority_policy": (
+            {"version": policy.version, "fingerprint": policy.fingerprint}
+            if policy is not None
+            else None
+        ),
         "observations": [
             {
                 "index": o.index,
@@ -112,8 +126,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("reference", help="snapshot id, or case id for its posting body")
     parser.add_argument("--navigate", action="store_true", help="allow real FOLLOW/RENDER")
+    parser.add_argument(
+        "--policy",
+        metavar="PATH",
+        help="official-host mapping to classify with (default: none, never the worker's)",
+    )
     args = parser.parse_args(argv)
-    print(json.dumps(replay(args.reference, navigate=args.navigate), ensure_ascii=False, indent=2))
+    policy = load_official_hosts(args.policy) if args.policy else None
+    print(
+        json.dumps(
+            replay(args.reference, navigate=args.navigate, policy=policy),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

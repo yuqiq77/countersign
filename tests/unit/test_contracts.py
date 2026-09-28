@@ -132,3 +132,42 @@ def test_page_readings_stored_with_string_rejections_remain_readable() -> None:
         reason="not found",
     )
     assert structured.describe() == "evidence CLOSED_NOTICE 'filled' (observation 1): not found"
+
+
+def test_page_readings_without_authority_trace_read_back_as_not_recorded() -> None:
+    """Ticket 002: readings written before the mapping existed keep loading,
+    and their missing fields mean "not recorded", never an explicit "none"."""
+
+    from countersign.contracts.page_reading import PageReadingRecord
+
+    record = PageReadingRecord.model_validate(
+        {
+            "reading_id": "read-case-1-g1",
+            "case_id": "case-1",
+            "url": "https://careers.acme.example/roles/1",
+            "observations": [
+                {
+                    "index": 0,
+                    "source_url": "https://careers.acme.example/roles/1",
+                    "how": "STATIC",
+                    "http_status": 200,
+                    "snapshot_id": "snap-1",
+                }
+            ],
+            "body_observation": 0,
+            "apply_entry": None,
+            "evidence": [],
+            "rejected_claims": [],
+            "steps": [],
+            "stop_reason": "DONE",
+            "prompt_version": "page-reader/0.5.0",
+            "usage": None,
+            "read_at": "2026-09-27T12:00:00Z",
+        },
+        strict=False,
+    )
+    (ref,) = record.observations
+    assert ref.authority is None and ref.official_host_entry is None
+    assert record.authority_policy_version is None
+    assert record.authority_policy_fingerprint is None
+    assert record.body_text_chars is None

@@ -10,6 +10,7 @@ from countersign.activities import ALL_ACTIVITIES
 from countersign.capabilities.render import CHROMIUM_PATH_VAR, chromium_binary
 from countersign.gateway.evaluator import profile_fingerprint
 from countersign.policy.defaults import EXAMPLE_BANDS, salary_bands
+from countersign.policy.official_hosts import OFFICIAL_HOSTS_PATH_VAR, load_official_hosts
 from countersign.policy.operator_profile import PROFILE_PATH_VAR, load_operator_profile
 from countersign.runtime import TASK_QUEUE, connect_client
 from countersign.workflows.job_case import JobIntelligenceWorkflow
@@ -43,6 +44,7 @@ def run() -> None:
     try:
         bands = salary_bands()
         profile = load_operator_profile()
+        official_hosts = load_official_hosts()
     except ValueError as exc:
         _log.error("refusing to start: %s", exc)
         raise SystemExit(2) from exc
@@ -62,6 +64,19 @@ def run() -> None:
             "operator profile: loaded, %d chars, fingerprint=%s",
             len(profile),
             profile_fingerprint(profile),
+        )
+    if official_hosts is None:
+        _log.info(
+            "official hosts: not configured (%s unset); only known ATS hosts are official",
+            OFFICIAL_HOSTS_PATH_VAR,
+        )
+    else:
+        # Count and identity only: the hostnames are operator-private.
+        _log.info(
+            "official hosts: %d entries, version=%s, fingerprint=%s",
+            len(official_hosts.hosts),
+            official_hosts.version,
+            official_hosts.fingerprint,
         )
     if bands is EXAMPLE_BANDS:
         _log.warning(

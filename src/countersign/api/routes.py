@@ -137,13 +137,15 @@ def get_case(case_id: str) -> CaseDetail:
             if evaluation is not None and verification is not None
             else None
         )
+        snapshot, body_ref = repo.body_observation(session, case_id)
         return CaseDetail(
             case_id=row.id,
             state=CaseState(row.state),
             url=row.url,
             created_at=row.created_at,
             updated_at=row.updated_at,
-            snapshot=repo.body_snapshot(session, case_id),
+            snapshot=snapshot,
+            posting_authority=body_ref.authority if body_ref is not None else None,
             verification=verification,
             evaluation=evaluation,
             gated_decision=gated,

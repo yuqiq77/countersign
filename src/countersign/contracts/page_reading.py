@@ -155,6 +155,11 @@ class ObservationRef(ContractModel):
     how: ObservationHow
     http_status: int
     snapshot_id: str | None = None
+    # The authority this attempt gave the observation and, when a configured
+    # official host matched, that entry's company key (ticket 002). None on
+    # records written before the fields existed: not recorded, not "none".
+    authority: SourceAuthority | None = None
+    official_host_entry: str | None = None
 
 
 class StepLog(ContractModel):
@@ -225,3 +230,15 @@ class PageReadingRecord(ContractModel):
     # The model's free-text notes on the final reading: assessment, not
     # evidence, kept so an empty reading can be audited without a replay.
     notes: str = ""
+    # The official-host mapping in force for this attempt (declared version
+    # and content fingerprint) and the normalized text length of the body
+    # observation, which a retried verify Activity returns with the stored
+    # result. None means not recorded (older records), never "no mapping".
+    authority_policy_version: str | None = None
+    authority_policy_fingerprint: str | None = None
+    body_text_chars: int | None = None
+
+    def body_ref(self) -> ObservationRef | None:
+        """The observation reference the reading identified as the posting body."""
+
+        return next((r for r in self.observations if r.index == self.body_observation), None)

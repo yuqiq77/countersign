@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from countersign.agents.page_reader import ReaderResult, read_page
+from countersign.agents.page_reader import AuthorityFn, ReaderResult, read_page
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
 from countersign.capabilities.normalize import (
     EXTRACTOR_NAME,
@@ -56,9 +56,56 @@ from countersign.persistence import repo
 from countersign.persistence.blobstore import DatabaseBlobStore, sha256_hex
 from countersign.persistence.db import session_scope
 from countersign.policy.defaults import salary_bands
+from countersign.policy.official_hosts import OfficialHostPolicy, load_official_hosts
 from countersign.policy.operator_profile import load_operator_profile
 
 APPROVAL_TTL_DAYS = 7
+
+
+def _authority_policy() -> tuple[OfficialHostPolicy | None, AuthorityFn]:
+    """The official-host mapping for this Activity attempt, loaded once (ticket 002).
+
+    Every observation of the attempt is classified by the same revision; a
+    later attempt may load a newer file, and the reading records which
+    revision it used. Unset means the classification that existed before
+    the mapping.
+    """
+
+    try:
+        policy = load_official_hosts()
+    except ValueError as exc:
+        # A mapping that stopped parsing after worker start is a
+        # configuration failure, not a transient one: no retries, and a
+        # reason the case's audit trail can name.
+        raise ApplicationError(str(exc), type="PolicyError", non_retryable=True) from exc
+    return policy, (policy.classify if policy is not None else classify_authority)
+
+
+def _stored_body_text_chars(session: Session, verification: VerificationResult) -> int | None:
+    """The body text length a stored verification's reading recorded, or recomputed.
+
+    A reading written before `body_text_chars` existed is re-normalized
+    from its body snapshot; only a missing snapshot leaves None, which the
+    workflow treats as the old-history path.
+    """
+
+    reading = (
+        repo.get_page_reading(session, verification.reading_id)
+        if verification.reading_id is not None
+        else None
+    )
+    if reading is None:
+        return None
+    if reading.body_text_chars is not None:
+        return reading.body_text_chars
+    ref = reading.body_ref()
+    snapshot = (
+        repo.get_snapshot(session, ref.snapshot_id)
+        if ref is not None and ref.snapshot_id is not None
+        else None
+    )
+    body = DatabaseBlobStore(session).get(snapshot.raw_object_key) if snapshot else None
+    return None if body is None else len(normalize_html(body).text)
 
 
 def _workflow_id() -> str | None:
@@ -81,6 +128,7 @@ def _fetch(url: str) -> FetchResult:
 def snapshot_source(payload: CaseWorkflowInput) -> SnapshotOutcome:
     """Fetch the pasted URL, store the raw body, and record provenance."""
 
+    _, authority_of = _authority_policy()
     result = _fetch(payload.url)
     content_hash = sha256_hex(result.body)
     snapshot_id = _snapshot_id(
@@ -97,7 +145,7 @@ def snapshot_source(payload: CaseWorkflowInput) -> SnapshotOutcome:
             canonical_url=payload.url,
             final_url=result.final_url,
             source_type="pasted_url",
-            authority_level=classify_authority(result.final_url),
+            authority_level=authority_of(result.final_url),
             retrieved_at=repo.utcnow(),
             http_status=result.http_status,
             content_type=result.content_type,
@@ -226,11 +274,29 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
     and schema failures are recorded in the reading's step log instead.
     """
 
+    reading_id = ids.reading_id(payload.case_id, payload.generation)
+    verification_id = ids.verification_id(payload.case_id, payload.generation)
+    with session_scope() as session:
+        stored = repo.get_verification(session, verification_id)
+        if stored is not None:
+            # Committed by an earlier attempt whose completion Temporal did
+            # not see. The stored record is the result, and the text length
+            # the workflow branches on comes back with it: None would take
+            # the old-history path and skip the empty-body stop.
+            chars = _stored_body_text_chars(session, stored)
+            activity.logger.info(
+                "verify: %s already recorded as %s; returning the stored result",
+                payload.case_id,
+                stored.status.value,
+            )
+            return VerifyOutcome(verification=stored, observed_text_chars=chars)
+
+    policy, authority_of = _authority_policy()
     first = _fetch(payload.url)
     result: ReaderResult = read_page(
         payload.url,
         first=first,
-        authority_of=classify_authority,
+        authority_of=authority_of,
         fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
         render=render_url,
         provider=resolve_provider(),
@@ -246,8 +312,7 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
         e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
         for e in result.evidence
     )
-    reading_id = ids.reading_id(payload.case_id, payload.generation)
-    verification_id = ids.verification_id(payload.case_id, payload.generation)
+    body_text = result.observations[result.body_observation].text
 
     with session_scope() as session:
         first_snapshot = repo.body_snapshot(session, payload.case_id)
@@ -266,6 +331,10 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
                     how=obs.how,
                     http_status=obs.http_status,
                     snapshot_id=_store_observation(session, payload.case_id, obs),
+                    authority=obs.authority,
+                    official_host_entry=(
+                        policy.entry_for(obs.source_url) if policy is not None else None
+                    ),
                 )
             )
         reading = PageReadingRecord(
@@ -283,6 +352,9 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             usage=result.usage,
             read_at=repo.utcnow(),
             notes=result.notes,
+            authority_policy_version=policy.version if policy is not None else None,
+            authority_policy_fingerprint=policy.fingerprint if policy is not None else None,
+            body_text_chars=len(body_text),
         )
         repo.record_page_reading(session, reading)
 
@@ -318,7 +390,6 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             actor_id="worker",
             workflow_id=_workflow_id(),
         )
-    body_text = result.observations[result.body_observation].text
     activity.logger.info(
         "verify: %s status=%s entry=%s observations=%d stop=%s rejected=%d",
         payload.case_id,
@@ -328,7 +399,24 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
         result.stop_reason.value,
         len(result.rejected_claims),
     )
-    return VerifyOutcome(verification=verification, observed_text_chars=len(body_text))
+    # The database holds one reading and one verification per id, and the
+    # `record_*` calls keep the first row written. A timed-out attempt that
+    # Temporal already replaced may still commit first while this one runs;
+    # the workflow must then carry what the database holds, not what this
+    # attempt computed, so the result is read back after the commit.
+    with session_scope() as session:
+        stored = repo.get_verification(session, verification_id)
+        if stored is None:
+            raise ApplicationError("verification not stored", type="MissingVerification")
+        if stored != verification:
+            activity.logger.info(
+                "verify: %s recorded by another attempt as %s; returning the stored result",
+                payload.case_id,
+                stored.status.value,
+            )
+        return VerifyOutcome(
+            verification=stored, observed_text_chars=_stored_body_text_chars(session, stored)
+        )
 
 
 @activity.defn(name="evaluate_case")
@@ -336,13 +424,21 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
     """Run the governed model evaluation and persist the versioned record."""
 
     with session_scope() as session:
-        snapshot = repo.body_snapshot(session, payload.case_id)
+        snapshot, body_ref = repo.body_observation(session, payload.case_id)
         if snapshot is None:
             raise ApplicationError("no snapshot for case", type="MissingSnapshot")
         body = DatabaseBlobStore(session).get(snapshot.raw_object_key)
         if body is None:
             raise ApplicationError("blob missing", type="MissingBlob")
         verification = repo.latest_verification(session, payload.case_id)
+        # The reading's own authority for the body observation, when
+        # recorded; a reused snapshot's stamp can predate the official-host
+        # mapping (ticket 002).
+        body_authority = (
+            body_ref.authority
+            if body_ref is not None and body_ref.authority is not None
+            else snapshot.authority_level
+        )
         case = repo.get_case(session, payload.case_id)
         title = case.title if case is not None else None
         # Reviewer notes from earlier rounds ride along as human-asserted
@@ -372,7 +468,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             title=normalized.title or title,
             text=normalized.text,
             verification=verification,
-            source_authority=snapshot.authority_level,
+            source_authority=body_authority,
             bands=salary_bands(),
             profile=load_operator_profile(),
             operator_context=context,
