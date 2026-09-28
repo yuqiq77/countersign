@@ -7,10 +7,10 @@ gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-27 |
-| Branch | `main`, no remote; approval simplification: `f02b2af`. Documentation committed separately. |
+| As of | 2026-09-28 |
+| Branch | `main`, no remote; official-host mapping: `a6ae8db`. Documentation committed separately. |
 | Slice | Slice 1 implementation and core live paths verified; release/tag decision remains with the owner. |
-| Current focus | Approval simplification implemented and deployed; live acceptance pending. Ticket 002 remains a local Slice 2 draft for owner review. |
+| Current focus | Ticket 002 closed: implementation verified, mapped/unmapped live check passed. Rebuild for the final retry/file-read fixes; Ashby is the next adapter. Simplified approval live acceptance remains pending. |
 
 ## Current state
 
@@ -19,6 +19,15 @@ gitignored `HANDOFF.md`.
   repair within the existing step budget, structured rejected claims and
   backward-readable records. Source checks, authority rules and navigation
   permissions are unchanged. Pydantic minimum is 2.11.
+- **Official hosts ([ticket 002](tickets/002-official-domain-mapping.md)):**
+  private JSON via `COUNTERSIGN_OFFICIAL_HOSTS_PATH`, validated at worker
+  start; exact hosts only, no new navigation permissions. A match grants
+  `OFFICIAL_COMPANY`, not `OPEN` without a cited apply entry. Readings
+  retain policy version/fingerprint and per-observation authority;
+  posting consumers use the body observation, with a snapshot fallback
+  for legacy records. Retries return persisted results and body length;
+  unreadable/invalid policy fails without retries. Replay uses only an
+  explicit `--policy`. No schema change; unset preserves prior behavior.
 - **Fetch/render:** per-fetch redirect cookies use logical hostnames; the
   shared client's jar is inert. Rendering permits page-named resources
   under the existing DNS-pinned, read-only policy.
@@ -35,28 +44,29 @@ gitignored `HANDOFF.md`.
 
 ## Verification and deployment
 
-Code commit `f02b2af` was checked on 2026-09-27 in a fresh detached
+Code commit `a6ae8db` was checked on 2026-09-28 in a fresh detached
 worktree and Python 3.14.3 venv; front-end dependencies came from
 `pnpm-lock.yaml`:
 
 - `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
-  109 Python files; `.venv/bin/pyright`: 0 errors;
+  112 files reported by the formatter; `.venv/bin/pyright`: 0 errors;
   `.venv/bin/lint-imports`: 3 contracts kept.
-- `.venv/bin/pytest -ra`: **221 passed, no skips**. PostgreSQL integration
-  used disposable database `countersign_approval_code_f02b2af` at
+- `.venv/bin/pytest -ra`: **259 passed, no skips**. PostgreSQL integration
+  used disposable database `countersign_hosts_code_a6ae8db` at
   `127.0.0.1:5435` (dropped afterwards). Other database fixtures used
   SQLite; Temporal used its test server and rendering used local Chrome.
-  Private profile/salary inputs were unset; model providers were fakes.
+  Private profile/mapping/salary inputs were unset; model providers were fakes.
 - `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
 
-The owner reset the business database and Temporal history and rebuilt on
-2026-09-27. Read-only checks confirmed the new
-`approved_without_official_open` column, removal of the old decision
-columns and Signal fields, and the worker's derived-flag logic. Both
-stores were empty at inspection. Business records were exported privately;
-old Temporal history was not retained. The simplified approval flow has
-not yet been observed live after this cutover. This commit verification
-did not deploy or make live model calls.
+The owner reset the business database and Temporal history on 2026-09-27
+(business export retained privately, old Temporal history not retained).
+The mapped/unmapped live check passed on 2026-09-28: the same company
+page went from `OPEN_THIRD_PARTY_ONLY` to `OPEN` / `OFFICIAL_COMPANY`,
+with policy identity on the reading. Read-only inspection confirmed the
+running worker loads the mapping but predates the final overlapping-retry
+and unreadable-file fixes; a rebuild remains. No human decisions were
+stored at inspection, so simplified approval live acceptance is still
+pending. Commit verification did not deploy or make live model calls.
 
 ## Live evidence and remaining coverage
 
@@ -86,17 +96,22 @@ rules; the successful board run does not prove those specific paths.
    coverage above. Before publication: full gitleaks/private-identifier
    sweep, release tag and v4 §25 claim review. The owner adds the remote
    and pushes; no tag or publication is implied by this commit series.
-2. Confirm the simplified approval flow live, then review local draft
-   Ticket 002 for company → official-host mapping. Mapping implementation
-   has not started. The owner chose Ashby as the first ATS adapter, using
-   existing cases for validation, ahead of v4's Greenhouse-first sequence.
-   Mapping changes source authority, not human approval rules.
+2. Rebuild for the final ticket 002 fixes and complete simplified approval
+   live acceptance. Next development ticket: **Ashby first**, using the
+   existing cases, per the owner's choice ahead of v4's Greenhouse-first
+   sequence. Mapping changes source authority, not human approval rules.
 3. Then scans/rechecks, registries, calibration (including score noise),
    traces and cost, within the v4 §24 timebox. Research remains Slice 2.5
    under ADR-011.
 
 ## Known limits and deferred decisions
 
+- Host normalization uses Python's built-in IDNA, which differs from the
+  HTTP client for some names (such as `ß`): a Unicode entry can miss its
+  intended punycode host or grant authority to a different ASCII spelling.
+  Accepted/deferred by the owner on 2026-09-28; use verified ASCII/punycode
+  entries for now. A mapped main host covers all its paths; apply-entry
+  checks do not eliminate reader misinterpretation.
 - Host-only cookies also reach subdomains under the current cookiejar
   policy; accepted for now. A main-document redirect to a named resource
   host can send one GET before the renderer rejects the final host

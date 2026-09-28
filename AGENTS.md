@@ -92,10 +92,10 @@ them.
   its UI on `:8080`. Do not "normalize" them back, and do not disturb other
   development servers running on this machine.
 - **`classify_authority` is deliberately conservative.** Only known ATS
-  hosts (Greenhouse, Lever, Ashby, SmartRecruiters) reach `OFFICIAL_*` and
-  a verified `OPEN`; a company-controlled page stalls at
-  `OPEN_THIRD_PARTY_ONLY` until the Slice 2 watchlist maps company →
-  official domains. That is not a bug; do not add host or path heuristics.
+  hosts (Greenhouse, Lever, Ashby, SmartRecruiters) and explicitly mapped
+  company hosts reach `OFFICIAL_*`; verified `OPEN` still requires an
+  accepting apply entry. An unmapped company-controlled page stays at
+  most `OPEN_THIRD_PARTY_ONLY`. Do not add host or path heuristics.
 - **The page reader is the only model-driven navigation** (ADR-012). Its
   moves are `RENDER` and `FOLLOW`, both read-only and allowlisted by
   construction; its claims count only after source/citation checks,
@@ -121,6 +121,15 @@ them.
   own round's approval Signal from its first event. "In flight" is
   computed by the server from stored records (`repo.in_flight`); do not
   reintroduce a client-side state list.
+- **Official hosts are explicit operator policy** (ticket 002): exact
+  normalized hostnames from the file named by
+  `COUNTERSIGN_OFFICIAL_HOSTS_PATH`, nothing else. Do not add wildcards,
+  registrable-domain guesses, path rules, company-name matching or
+  model-authored entries; vendor ATS hosts belong in the code list, and a
+  board stays a board. Consumers take an observation's authority from the
+  reading that classified it, falling back to the snapshot stamp only for
+  readings written before it was recorded. `replay_reading` never reads
+  the worker's mapping; it takes `--policy`.
 - **The approval gate is server-owned** (ADR-013, amended 2026-09-27).
   `APPROVE` is offered on any verification pinned to the request that is
   not `CLOSED`/`EXPIRED`; approving a posting the system did not verify

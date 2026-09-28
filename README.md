@@ -102,7 +102,7 @@ resume with no duplicate snapshot, evaluation, or audit event.
 
 ## Current scope
 
-Implemented (Slice 1 — one durable case):
+Implemented (Slice 1 core plus Slice 2 official-host mapping):
 
 - paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
 - `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
@@ -126,6 +126,15 @@ Implemented (Slice 1 — one durable case):
   permits APPROVE when its pinned verification is not CLOSED/EXPIRED.
   Approval without official OPEN is recorded as the reviewer's own
   verification with its own audit event (ADR-013, amended);
+- explicit official company hosts: a private JSON mapping of exact
+  hostnames the operator declares official, loaded by path like the
+  profile and validated at worker start; a matched host is
+  OFFICIAL_COMPANY and can reach OPEN with a cited apply entry. No
+  wildcards, path rules or inference, boards stay boards, and each reading
+  records the mapping version and fingerprint with every observation's
+  authority; a retried verification returns the stored result. IDNA
+  normalization can differ from the HTTP client; use verified ASCII or
+  punycode entries (see [known limits](docs/STATUS.md#known-limits-and-deferred-decisions));
 - an evidence loop: "add context and re-evaluate" records the reviewer's
   note as their decision and continues the same workflow into the next
   round, which re-verifies the posting and re-evaluates with the note as
