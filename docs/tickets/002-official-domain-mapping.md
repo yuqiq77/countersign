@@ -1,7 +1,7 @@
 # Ticket 002 — Recognize explicitly configured official company hosts
 
 - Status: complete, 2026-09-28; code `a6ae8db`, documentation committed
-  separately. Final retry/file-read fixes await deployment.
+  separately. Final retry/file-read fixes confirmed deployed after closeout.
 - Slice: first Slice 2 ticket; the authority portion of the watchlist
   (v4 §11 item 2, "a versioned policy artifact").
 - Basis: [v4 §§11–12, 17, 24](../job-search-agent-architecture-v4.md),
@@ -234,9 +234,11 @@ null policy fields. Mapped, it was `OPEN` / `OFFICIAL_COMPANY` on the same
 cited mailto entry, with policy version/fingerprint and body-observation
 authority recorded. This verifies source authority, not that evaluation
 is generally unaffected: official-salary provenance uses that authority.
-The deployed worker predates the final overlapping-retry and unreadable-file
-fixes; rebuild before relying on them. Simplified approval live acceptance
-is a separate pending check.
+Post-closeout read-only inspection on 2026-09-28 confirmed the owner's
+rebuilt worker includes the final overlapping-retry and unreadable-file
+fixes. The separate simplified-approval live check also passed: one
+non-official `APPROVE` reached `APPROVED` with the derived flag and audit
+events recorded (see STATUS).
 
 Known limits accepted by the owner at closeout: Python's built-in IDNA
 and the HTTP client differ for some Unicode hostnames (for example `ß`).

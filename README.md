@@ -1,8 +1,91 @@
 # Countersign
 
-A production-oriented, single-user agentic workflow system for collecting, verifying, evaluating, and approving external job intelligence.
+A production-oriented workflow system for one narrow agentic task: checking
+whether a job posting is still open and worth applying to, and leaving a
+record a human can sign off on.
 
-The implementation baseline is [Architecture v4](docs/job-search-agent-architecture-v4.md). The project is currently in **Slice 1: one durable case**; runtime features described by the architecture are not claimed until their code, tests, and telemetry exist.
+The model reads and judges, code decides what counts as verified, and a
+human makes the call. Each stage runs as a durable workflow step with
+idempotent effects and an append-only audit trail, so a result can be
+traced to the page, the rule, the model call and the human decision behind
+it.
+
+The implementation baseline is [Architecture v4](docs/job-search-agent-architecture-v4.md). The project is currently in **Slice 1: one durable case**; runtime features described by the architecture are not claimed until their code, tests, and telemetry exist. [Current scope](#current-scope) lists what is implemented.
+
+## Why this exists
+
+It started with a small, specific failure. A general-purpose agent running
+a scheduled job search kept returning stale postings and links that had
+already gone 404. The answers carried links but no evidence: nothing showed
+when a posting had last been seen open, or whether anything had checked. A
+better prompt would have made the answers more convincing, not more
+checkable.
+
+Making them checkable is a systems problem rather than a prompting one:
+
+- **Status comes from rules in code, applied to what the page shows.** A
+  404 or 410 is CLOSED, a past `validThrough` is EXPIRED, and OPEN needs a
+  cited apply entry on an official source; anywhere else the same entry
+  reaches only OPEN_THIRD_PARTY_ONLY. HTTP 200 alone proves nothing
+  ([decision table](src/countersign/domain/verification.py)).
+- **External calls fail.** Fetches and model calls retry as durable
+  workflow steps, and a worker killed mid-step resumes without writing a
+  second snapshot, evaluation or audit event.
+- **The decision belongs to a human** and can arrive days later. The
+  approval request waits as durable workflow state and pins the snapshot,
+  verification and evaluation it was issued for.
+- **Model output is attributable.** Readings and evaluations are stored
+  with the prompt version, model, token counts and latency of the calls
+  behind them; evaluations also carry the policy version.
+
+## A production system, not a personal agent
+
+Personal agents are built for breadth: one assistant for many tasks, with
+the answer as the product. Countersign goes the other way. It runs one task
+through a fixed pipeline, and the record is the product:
+
+```text
+URL → snapshot → page reader → status → evaluation → approval
+      code       model         code     model        human
+```
+
+The model's autonomy is bounded on purpose. The only loop it drives is the
+page reader's choice to render the page or follow a listed link, inside one
+Activity and under step budgets enforced in code
+([ADR-012](docs/adr/012-bounded-page-reader.md)); its claims count only
+after citation checks. Besides approving or rejecting, the reviewer can add
+context and send the case through another round of verification and
+evaluation, up to three rounds in all
+([ADR-014](docs/adr/014-evidence-loop-through-request-evidence.md)).
+
+The question behind the project is not how to build a better job-search
+assistant, but what it takes to make an agentic workflow recoverable,
+reviewable, attributable and auditable.
+
+## Why Temporal for one user
+
+Temporal is heavy for a single-user tool, and it is here on purpose. The
+problems it solves already exist at n=1: fetches and model calls fail and
+must be retried without repeating their effects, an approval can wait up
+to seven days, and a worker can die mid-step. Without it, the same
+guarantees would have to be rebuilt from cron jobs, status columns and
+hand-written retry and timer code.
+
+The costs are accepted and written down: workflow code must stay
+deterministic (the import boundary that keeps I/O in Activities is enforced
+by import-linter), a Temporal service has to run, and idempotency still
+belongs to the application because Activities run at least once.
+[ADR-001](docs/adr/001-temporal-durable-workflow.md) records the decision
+and the conditions for revisiting it.
+
+## What it does not demonstrate
+
+It has one operator and a small, real workload, so it says nothing about
+scale (traffic, concurrency, horizontal scaling), multi-user security or
+team engineering process. Self-hosted Temporal on one host shows recovery
+from a worker crash, not host failover. Planned pieces that are not built
+yet, including scheduled scans and rechecks, authorization, traces, cost
+dashboards and evals, are listed under [Current scope](#current-scope).
 
 ## Architecture at a glance
 
@@ -39,6 +122,11 @@ Important import boundaries: `countersign.domain` may import only `countersign.c
 - [ADR-003 — Three kinds of truth](docs/adr/003-separate-three-kinds-of-truth.md)
 - [ADR-004 — Central capability registry](docs/adr/004-central-capability-registry.md)
 - [ADR-005 — Official-source authority](docs/adr/005-official-source-authority.md)
+- [ADR-011 — Bounded company-research loop](docs/adr/011-bounded-company-research-loop.md)
+- [ADR-012 — Bounded page reader](docs/adr/012-bounded-page-reader.md)
+- [ADR-013 — Human attestation for unverified postings](docs/adr/013-human-attestation-for-unverified-postings.md)
+- [ADR-014 — Evidence loop through REQUEST_EVIDENCE](docs/adr/014-evidence-loop-through-request-evidence.md)
+- [ADR-015 — Render network policy](docs/adr/015-render-network-policy.md)
 
 ## Local checks
 

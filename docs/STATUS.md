@@ -10,7 +10,7 @@ gitignored `HANDOFF.md`.
 | As of | 2026-09-28 |
 | Branch | `main`, no remote; official-host mapping: `a6ae8db`. Documentation committed separately. |
 | Slice | Slice 1 implementation and core live paths verified; release/tag decision remains with the owner. |
-| Current focus | Ticket 002 closed: implementation verified, mapped/unmapped live check passed. Rebuild for the final retry/file-read fixes; Ashby is the next adapter. Simplified approval live acceptance remains pending. |
+| Current focus | Ticket 002 closed and final fixes deployed; mapped/unmapped and simplified approval live checks passed. Next development ticket: Ashby adapter. |
 
 ## Current state
 
@@ -62,11 +62,14 @@ The owner reset the business database and Temporal history on 2026-09-27
 (business export retained privately, old Temporal history not retained).
 The mapped/unmapped live check passed on 2026-09-28: the same company
 page went from `OPEN_THIRD_PARTY_ONLY` to `OPEN` / `OFFICIAL_COMPANY`,
-with policy identity on the reading. Read-only inspection confirmed the
-running worker loads the mapping but predates the final overlapping-retry
-and unreadable-file fixes; a rebuild remains. No human decisions were
-stored at inspection, so simplified approval live acceptance is still
-pending. Commit verification did not deploy or make live model calls.
+with policy identity on the reading. After the owner's rebuild, read-only
+`docker compose exec worker` inspection confirmed the final overlapping-retry
+and unreadable-file fixes and a loaded mapping. A `psql` read-only transaction
+against the Compose `countersign` business database confirmed simplified
+approval live: one `APPROVE` pinned to `OPEN_THIRD_PARTY_ONLY`, request
+`DECIDED`, case `APPROVED`, `approved_without_official_open=true`, and both
+`approval.approve` and `human.verification_attested` audit events present.
+These checks neither changed business data nor invoked a model.
 
 ## Live evidence and remaining coverage
 
@@ -96,8 +99,7 @@ rules; the successful board run does not prove those specific paths.
    coverage above. Before publication: full gitleaks/private-identifier
    sweep, release tag and v4 §25 claim review. The owner adds the remote
    and pushes; no tag or publication is implied by this commit series.
-2. Rebuild for the final ticket 002 fixes and complete simplified approval
-   live acceptance. Next development ticket: **Ashby first**, using the
+2. Next development ticket: **Ashby first**, using the
    existing cases, per the owner's choice ahead of v4's Greenhouse-first
    sequence. Mapping changes source authority, not human approval rules.
 3. Then scans/rechecks, registries, calibration (including score noise),
