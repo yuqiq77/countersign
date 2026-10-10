@@ -190,7 +190,8 @@ resume with no duplicate snapshot, evaluation, or audit event.
 
 ## Current scope
 
-Implemented (Slice 1 core plus Slice 2 official-host mapping):
+Implemented (Slice 1 core plus Slice 2 official-host mapping and the
+Ashby adapter):
 
 - paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
 - `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
@@ -223,6 +224,14 @@ Implemented (Slice 1 core plus Slice 2 official-host mapping):
   authority; a retried verification returns the stored result. IDNA
   normalization can differ from the HTTP client; use verified ASCII or
   punycode entries (see [known limits](docs/STATUS.md#known-limits-and-deferred-decisions));
+- an Ashby adapter in verification ([ticket 003](docs/tickets/003-ashby-adapter.md)):
+  a posting page on Ashby is looked up once in its board's public
+  posting API. A posting the API publishes with an apply link is verified
+  from that OFFICIAL_ATS response without a model call, while the page's
+  own 404/410 or past `validThrough` still decides; an absent posting,
+  an unavailable, oversized or malformed response leaves the reading to
+  the page reader, and the reading records the outcome. Absence never
+  closes a posting; no discovery or polling;
 - an evidence loop: "add context and re-evaluate" records the reviewer's
   note as their decision and continues the same workflow into the next
   round, which re-verifies the posting and re-evaluates with the note as
@@ -246,7 +255,8 @@ Implemented (Slice 1 core plus Slice 2 official-host mapping):
 
 Not implemented yet (Slice 2+):
 
-- watchlist + ATS adapters, scheduled scans and rechecks, capability
-  registry policy enforcement, prompt/policy version registry;
+- watchlist, ATS discovery and further ATS adapters, scheduled scans and
+  rechecks, capability registry policy enforcement, prompt/policy version
+  registry;
 - authorization, failure inbox UI, OTel traces and cost dashboard;
 - golden evals, calibration, policy promotion.

@@ -7,10 +7,10 @@ gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-09-28 |
-| Branch | `main`, no remote; official-host mapping: `a6ae8db`. Documentation committed separately. |
+| As of | 2026-10-10 |
+| Branch | `main`, no remote; Ashby adapter: `d537802`. Documentation committed separately. |
 | Slice | Slice 1 implementation and core live paths verified; release/tag decision remains with the owner. |
-| Current focus | Ticket 002 closed and final fixes deployed; mapped/unmapped and simplified approval live checks passed. Next development ticket: Ashby adapter. |
+| Current focus | Ticket 003 (Ashby adapter) implemented, reviewed and verified; live API and reader-fallback checks recorded. The final ATS-host classification line awaits worker rebuild. |
 
 ## Current state
 
@@ -28,6 +28,17 @@ gitignored `HANDOFF.md`.
   for legacy records. Retries return persisted results and body length;
   unreadable/invalid policy fails without retries. Replay uses only an
   explicit `--policy`. No schema change; unset preserves prior behavior.
+- **Ashby adapter ([ticket 003](tickets/003-ashby-adapter.md)):**
+  a page landing on an Ashby posting is looked up once in its board's
+  public posting API (8 MB cap for that call, inside the reading's time
+  budget). A published posting gets a code-made reading, the page as
+  observation 0 and body, the API response as OFFICIAL_ATS observation 1
+  with the apply link, and the existing table decides, so a 404/410 or
+  past `validThrough` on the page still wins. Anything else runs the
+  reader as before and records the attempt on the reading. No schema
+  change; replay does not exercise the adapter. The API host is also in
+  the shared ATS host list, so generic observations classify consistently
+  and company-host mappings cannot register it as a company host.
 - **Fetch/render:** per-fetch redirect cookies use logical hostnames; the
   shared client's jar is inert. Rendering permits page-named resources
   under the existing DNS-pinned, read-only policy.
@@ -44,19 +55,25 @@ gitignored `HANDOFF.md`.
 
 ## Verification and deployment
 
-Code commit `a6ae8db` was checked on 2026-09-28 in a fresh detached
-worktree and Python 3.14.3 venv; front-end dependencies came from
-`pnpm-lock.yaml`:
+Code commit `d537802` was checked on 2026-10-10 in a fresh detached
+worktree and Python 3.14.3 venv, with front-end dependencies installed
+from `pnpm-lock.yaml`:
 
 - `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
-  112 files reported by the formatter; `.venv/bin/pyright`: 0 errors;
+  118 files reported by the formatter; `.venv/bin/pyright`: 0 errors;
   `.venv/bin/lint-imports`: 3 contracts kept.
-- `.venv/bin/pytest -ra`: **259 passed, no skips**. PostgreSQL integration
-  used disposable database `countersign_hosts_code_a6ae8db` at
-  `127.0.0.1:5435` (dropped afterwards). Other database fixtures used
-  SQLite; Temporal used its test server and rendering used local Chrome.
-  Private profile/mapping/salary inputs were unset; model providers were fakes.
+- `.venv/bin/pytest -ra`: **295 passed, no skips**, using disposable
+  PostgreSQL database `countersign_ashby_code_d537802` at
+  `127.0.0.1:5435` (dropped afterwards), SQLite fixtures, Temporal's test
+  server and local Chrome. Private profile/mapping/salary inputs were
+  unset; model providers and external source responses were fakes.
 - `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+
+Ticket 003 records the owner's 2026-10-10 live check: three postings used
+the API path without a reader model call; a fourth exceeded the API body
+cap and reached OPEN through the reader's render fallback. The final
+ATS-host classification line was added after that check and still needs
+a worker rebuild. Commit verification did not deploy or call live models.
 
 The owner reset the business database and Temporal history on 2026-09-27
 (business export retained privately, old Temporal history not retained).
@@ -99,9 +116,9 @@ rules; the successful board run does not prove those specific paths.
    coverage above. Before publication: full gitleaks/private-identifier
    sweep, release tag and v4 §25 claim review. The owner adds the remote
    and pushes; no tag or publication is implied by this commit series.
-2. Next development ticket: **Ashby first**, using the
-   existing cases, per the owner's choice ahead of v4's Greenhouse-first
-   sequence. Mapping changes source authority, not human approval rules.
+2. Rebuild the worker for ticket 003's final ATS-host classification
+   line. The adapter's API and oversized-board fallback paths have
+   recorded live checks; approval rules are unchanged.
 3. Then scans/rechecks, registries, calibration (including score noise),
    traces and cost, within the v4 §24 timebox. Research remains Slice 2.5
    under ADR-011.
@@ -114,6 +131,9 @@ rules; the successful board run does not prove those specific paths.
   Accepted/deferred by the owner on 2026-09-28; use verified ASCII/punycode
   entries for now. A mapped main host covers all its paths; apply-entry
   checks do not eliminate reader misinterpretation.
+- Ashby adapter: the published path does not pre-render, so a posting
+  page with no text and no JSON-LD stops at NEEDS_MORE_EVIDENCE although
+  the API verified it OPEN (the API description as body is a follow-up).
 - Host-only cookies also reach subdomains under the current cookiejar
   policy; accepted for now. A main-document redirect to a named resource
   host can send one GET before the renderer rejects the final host
