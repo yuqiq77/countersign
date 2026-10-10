@@ -171,3 +171,5 @@ def test_page_readings_without_authority_trace_read_back_as_not_recorded() -> No
     assert record.authority_policy_version is None
     assert record.authority_policy_fingerprint is None
     assert record.body_text_chars is None
+    # Ticket 003: no ATS adapter outcome recorded either.
+    assert record.adapter is None

@@ -128,6 +128,31 @@ def test_streamed_body_over_limit_aborts_mid_stream(
         )
 
 
+def test_one_call_can_set_its_own_body_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ticket 003: an API with no per-job endpoint reads a whole board under
+    its own limit; every other fetch keeps the module's."""
+
+    monkeypatch.setattr(http_fetch, "MAX_BODY_BYTES", 100)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            stream=_ChunkStream([b"x" * 60, b"x" * 60, b"x" * 60]),
+        )
+
+    transport = httpx.MockTransport(handler)
+    result = fetch_url(
+        "http://example.com/board",
+        transport=transport,
+        enforce_network_policy=False,
+        max_body_bytes=200,
+    )
+    assert len(result.body) == 180
+    with pytest.raises(FetchPolicyError):
+        fetch_url("http://example.com/board", transport=transport, enforce_network_policy=False)
+
+
 def _cookie_site(seen: list[httpx.Request]):
     """A site whose application form sits behind a cookie-setting 302."""
 

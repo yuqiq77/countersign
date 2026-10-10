@@ -7,6 +7,7 @@ transient network errors propagate so Temporal's retry policy fires.
 """
 
 import json
+import time
 from datetime import timedelta
 
 import httpx
@@ -14,7 +15,15 @@ from sqlalchemy.orm import Session
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from countersign.agents.page_reader import AuthorityFn, ReaderResult, read_page
+from countersign.agents.page_reader import (
+    AuthorityFn,
+    ReaderConfig,
+    ReaderResult,
+    add_source_dates,
+    observe_response,
+    read_page,
+)
+from countersign.capabilities.ats import ashby
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
 from countersign.capabilities.normalize import (
     EXTRACTOR_NAME,
@@ -26,14 +35,23 @@ from countersign.capabilities.page_evidence import Observation
 from countersign.capabilities.render import render_url
 from countersign.contracts.enums import (
     ActorType,
+    ApplyEntryKind,
     ApprovalDecision,
     ApprovalRequestStatus,
     CaseState,
     EvidenceKind,
     JobStatus,
     ObservationHow,
+    ReaderAction,
+    ReaderStop,
 )
-from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
+from countersign.contracts.page_reading import (
+    ApplyEntry,
+    ObservationRef,
+    PageEvidence,
+    PageReadingRecord,
+    StepLog,
+)
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
 from countersign.contracts.workflow_io import (
@@ -220,6 +238,7 @@ _OBSERVATION_SOURCE = {
     ObservationHow.STATIC: "verification_observation",
     ObservationHow.RENDERED: "reader_rendered",
     ObservationHow.FOLLOWED: "reader_followed",
+    ObservationHow.API: "ats_api",
 }
 
 
@@ -248,12 +267,47 @@ def _store_observation(session: Session, case_id: str, obs: Observation) -> str:
         content_type=obs.content_type,
         content_hash=content_hash,
         raw_object_key=blob_key,
-        extractor_name=EXTRACTOR_NAME,
-        extractor_version=EXTRACTOR_VERSION,
+        extractor_name=obs.extractor_name,
+        extractor_version=obs.extractor_version,
         redirect_chain=obs.redirect_chain,
         request_trace_id=None,
     )
     return repo.record_snapshot(session, record)
+
+
+def _adapter_reading(
+    first: FetchResult, api: Observation, note: str, authority_of: AuthorityFn
+) -> ReaderResult:
+    """The reading an official ATS API observation makes without the model (ticket 003).
+
+    Observation 0 is the fetched page as the reader observes it and stays
+    the posting body; the apply entry is the API's apply link on
+    observation 1; page dates are added as the reader adds them. The
+    decision table then lets a 404/410 or a past validThrough on the page
+    win over that entry, as it would over a reader's.
+    """
+
+    page = observe_response(0, first, ObservationHow.STATIC, authority_of)
+    observations = [page, api]
+    evidence: list[PageEvidence] = []
+    add_source_dates(observations, evidence)
+    (control,) = api.controls
+    return ReaderResult(
+        observations=observations,
+        body_observation=page.index,
+        apply_entry=ApplyEntry(
+            kind=ApplyEntryKind.ATS_LINK,
+            observation=api.index,
+            cited_text=control.text,
+            href=control.href,
+        ),
+        evidence=evidence,
+        rejected_claims=[],
+        steps=[StepLog(step=0, action=ReaderAction.DONE, outcome=f"adapter {note}")],
+        stop_reason=ReaderStop.DONE,
+        usage=None,
+        prompt_version=ashby.READING_VERSION,
+    )
 
 
 @activity.defn(name="verify_status")
@@ -268,6 +322,13 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
     the status is decided by the domain decision table over the verified
     evidence. The verification record binds to the governing observation and
     to the reading, so an approval never pairs old content with new status.
+
+    When the fetched page is an Ashby posting (by its final URL), it is
+    first looked up in its board's public API (ticket 003). When the API
+    publishes it with an apply link, that observation carries the entry and
+    code makes the reading without the model; otherwise the reader runs as
+    before, within what remains of the same budget, and the reading records
+    what the API attempt found.
 
     Transient fetch errors on the primary observation and provider outages
     propagate so Temporal's retry policy fires; failures on followed links
@@ -293,14 +354,27 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
 
     policy, authority_of = _authority_policy()
     first = _fetch(payload.url)
-    result: ReaderResult = read_page(
-        payload.url,
-        first=first,
-        authority_of=authority_of,
-        fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
-        render=render_url,
-        provider=resolve_provider(),
+    started = time.monotonic()
+    ats = ashby.lookup(
+        first.final_url,
+        fetch=lambda url: fetch_url(url, max_body_bytes=ashby.MAX_BOARD_BYTES),
     )
+    adapter_note = ats.note if ats is not None else None
+    if ats is not None and ats.observation is not None:
+        result = _adapter_reading(first, ats.observation, ats.note, authority_of)
+    else:
+        # The API attempt spent part of the reading budget, not extra time:
+        # ADR-012 sizes the Activity for one first fetch plus one reading.
+        budget = ReaderConfig().wall_clock_seconds - (time.monotonic() - started)
+        result = read_page(
+            payload.url,
+            first=first,
+            authority_of=authority_of,
+            fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
+            render=render_url,
+            provider=resolve_provider(),
+            config=ReaderConfig(wall_clock_seconds=budget),
+        )
     chosen_index, status, reason = classify_reading(
         [o.dossier() for o in result.observations],
         result.apply_entry,
@@ -355,6 +429,7 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             authority_policy_version=policy.version if policy is not None else None,
             authority_policy_fingerprint=policy.fingerprint if policy is not None else None,
             body_text_chars=len(body_text),
+            adapter=adapter_note,
         )
         repo.record_page_reading(session, reading)
 
@@ -391,13 +466,14 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             workflow_id=_workflow_id(),
         )
     activity.logger.info(
-        "verify: %s status=%s entry=%s observations=%d stop=%s rejected=%d",
+        "verify: %s status=%s entry=%s observations=%d stop=%s rejected=%d adapter=%s",
         payload.case_id,
         status.value,
         result.apply_entry.kind.value if result.apply_entry else None,
         len(result.observations),
         result.stop_reason.value,
         len(result.rejected_claims),
+        adapter_note,
     )
     # The database holds one reading and one verification per id, and the
     # `record_*` calls keep the first row written. A timed-out attempt that

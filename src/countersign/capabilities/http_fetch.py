@@ -197,14 +197,14 @@ def _remaining(deadline: float) -> float:
     return min(TIMEOUT_SECONDS, remaining)
 
 
-def _read_limited(response: httpx.Response, deadline: float) -> bytes:
+def _read_limited(response: httpx.Response, deadline: float, limit: int) -> bytes:
     """Stream the body, aborting as soon as the size limit is exceeded."""
 
     declared = response.headers.get("content-length")
     if declared is not None:
         try:
-            if int(declared) > MAX_BODY_BYTES:
-                raise FetchPolicyError(f"declared content-length exceeds {MAX_BODY_BYTES} bytes")
+            if int(declared) > limit:
+                raise FetchPolicyError(f"declared content-length exceeds {limit} bytes")
         except ValueError:
             pass
     total = 0
@@ -212,8 +212,8 @@ def _read_limited(response: httpx.Response, deadline: float) -> bytes:
     for chunk in response.iter_bytes():
         _remaining(deadline)
         total += len(chunk)
-        if total > MAX_BODY_BYTES:
-            raise FetchPolicyError(f"response body exceeds {MAX_BODY_BYTES} bytes")
+        if total > limit:
+            raise FetchPolicyError(f"response body exceeds {limit} bytes")
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -224,6 +224,7 @@ def fetch_url(
     transport: httpx.BaseTransport | None = None,
     enforce_network_policy: bool = True,
     timeout_seconds: float = TIMEOUT_SECONDS,
+    max_body_bytes: int | None = None,
 ) -> FetchResult:
     """Fetch a URL with per-hop validation pinned to the vetted address.
 
@@ -231,7 +232,9 @@ def fetch_url(
     then connects to the vetted address directly — the original hostname
     travels in the Host header and TLS SNI, so a resolver that answers
     differently on a second lookup (DNS rebinding) never redirects the
-    connection. `transport` and `enforce_network_policy` exist for tests.
+    connection. `max_body_bytes` sets the size limit for one call (an ATS
+    API with no per-job endpoint, ticket 003); None is `MAX_BODY_BYTES`.
+    `transport` and `enforce_network_policy` exist for tests.
     """
 
     deadline = time.monotonic() + timeout_seconds
@@ -268,7 +271,9 @@ def fetch_url(
                 chain.append(current)
                 current = str(logical.join(location))
                 continue
-            body = _read_limited(response, deadline)
+            body = _read_limited(
+                response, deadline, MAX_BODY_BYTES if max_body_bytes is None else max_body_bytes
+            )
             content_type = response.headers.get("content-type", "application/octet-stream")
             base_type = content_type.split(";", 1)[0].strip().lower()
             if response.status_code < 400 and not base_type.startswith(_ALLOWED_CONTENT_PREFIXES):

@@ -330,6 +330,47 @@ def _richest(observations: list[Observation]) -> int:
     return max(range(len(observations)), key=lambda i: len(observations[i].text))
 
 
+def observe_response(
+    index: int, response: FetchResult, how: ObservationHow, authority_of: AuthorityFn
+) -> Observation:
+    """One response as an observation, classified by where it landed."""
+
+    return observe(
+        index=index,
+        source_url=response.final_url,
+        requested_url=response.requested_url,
+        how=how,
+        authority=authority_of(response.final_url),
+        http_status=response.http_status,
+        body=response.body,
+        content_type=response.content_type,
+        redirect_chain=response.redirect_chain,
+    )
+
+
+def add_source_dates(observations: list[Observation], evidence: list[PageEvidence]) -> None:
+    """Add each observation's JSON-LD `validThrough` to `evidence`, once.
+
+    Dates are source facts. They never create an apply entry or override
+    the model's rejection of a contact/share/save control.
+    """
+
+    for obs in observations:
+        if obs.jsonld is not None and obs.jsonld.valid_through:
+            already = any(
+                e.kind == EvidenceKind.VALID_THROUGH and e.observation == obs.index
+                for e in evidence
+            )
+            if not already:
+                evidence.append(
+                    PageEvidence(
+                        kind=EvidenceKind.VALID_THROUGH,
+                        cited_text=obs.jsonld.valid_through,
+                        observation=obs.index,
+                    )
+                )
+
+
 def _proposed(rejected: list[RejectedClaim]) -> str:
     if not rejected:
         return "reading proposed"
@@ -412,19 +453,7 @@ def read_page(
     observations: list[Observation] = []
 
     def add(response: FetchResult, how: ObservationHow) -> None:
-        observations.append(
-            observe(
-                index=len(observations),
-                source_url=response.final_url,
-                requested_url=response.requested_url,
-                how=how,
-                authority=authority_of(response.final_url),
-                http_status=response.http_status,
-                body=response.body,
-                content_type=response.content_type,
-                redirect_chain=response.redirect_chain,
-            )
-        )
+        observations.append(observe_response(len(observations), response, how, authority_of))
 
     add(first, ObservationHow.STATIC)
     steps: list[StepLog] = []
@@ -534,22 +563,7 @@ def read_page(
         if reading is not None
         else (_richest(observations), None, [], [])
     )
-    # Dates are source facts. They never create an apply entry or override
-    # the model's rejection of a contact/share/save control.
-    for obs in observations:
-        if obs.jsonld is not None and obs.jsonld.valid_through:
-            already = any(
-                e.kind == EvidenceKind.VALID_THROUGH and e.observation == obs.index
-                for e in evidence
-            )
-            if not already:
-                evidence.append(
-                    PageEvidence(
-                        kind=EvidenceKind.VALID_THROUGH,
-                        cited_text=obs.jsonld.valid_through,
-                        observation=obs.index,
-                    )
-                )
+    add_source_dates(observations, evidence)
     _log.info(
         "page reader: %s observations=%d steps=%d stop=%s rejected=%d",
         url,

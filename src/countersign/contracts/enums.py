@@ -32,11 +32,12 @@ class EvidenceKind(StrEnum):
 
 
 class ObservationHow(StrEnum):
-    """How the reader obtained one page observation."""
+    """How one observation was obtained; API is an ATS adapter's response (ticket 003)."""
 
     STATIC = "STATIC"
     RENDERED = "RENDERED"
     FOLLOWED = "FOLLOWED"
+    API = "API"
 
 
 class ReaderAction(StrEnum):

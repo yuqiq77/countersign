@@ -5,7 +5,7 @@ from html.parser import HTMLParser
 from typing import Any, cast
 from urllib.parse import urljoin
 
-from countersign.capabilities.normalize import normalize_html
+from countersign.capabilities.normalize import EXTRACTOR_NAME, EXTRACTOR_VERSION, normalize_html
 from countersign.contracts.enums import ObservationHow, SourceAuthority
 from countersign.contracts.page_reading import JsonLdSummary, PageControl, PageDossier
 
@@ -100,6 +100,9 @@ class Observation:
     requested_url: str = ""
     content_type: str = "text/html"
     redirect_chain: list[str] = field(default_factory=lambda: [])
+    # What turned the body into `text`, recorded on the stored snapshot.
+    extractor_name: str = EXTRACTOR_NAME
+    extractor_version: str = EXTRACTOR_VERSION
 
     def excerpt(self) -> tuple[str, bool]:
         if len(self.text) <= MAX_EXCERPT_CHARS:

@@ -136,3 +136,60 @@ def test_identical_bodies_preserve_each_sources_response(monkeypatch: pytest.Mon
         stored = repo.get_snapshot(session, third.snapshot_id)
         assert stored is not None and stored.http_status == 503
         assert stored.final_url == official.url
+
+
+@pytest.mark.usefixtures("postgres_db")
+def test_an_ashby_api_reading_persists_within_column_widths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ticket 003 on the deployment engine: the API observation's snapshot
+    (source type, adapter extractor, JSON body) and the reading's adapter
+    note round-trip within PostgreSQL's column widths."""
+
+    import json
+
+    from countersign.activities.case_activities import (
+        normalize_case,
+        snapshot_source,
+        verify_status,
+    )
+    from countersign.capabilities.http_fetch import FetchResult
+    from countersign.contracts.enums import JobStatus, ObservationHow
+    from countersign.contracts.workflow_io import CaseWorkflowInput
+    from countersign.domain import ids
+
+    posting_url = "https://jobs.ashbyhq.com/acme/4c1d7e2a-5b6f-4a8e-9d3c-2b1a0f9e8d7c"
+    board_url = "https://api.ashbyhq.com/posting-api/job-board/acme"
+    posting = {
+        "jobUrl": posting_url,
+        "applyUrl": f"{posting_url}/application",
+        "isListed": True,
+        "descriptionPlain": "Build durable systems.",
+    }
+    board = json.dumps({"apiVersion": "1", "jobs": [posting]}).encode()
+
+    def fetch(url: str, **_: object) -> FetchResult:
+        api = url == board_url
+        return FetchResult(
+            requested_url=url,
+            final_url=url,
+            http_status=200,
+            content_type="application/json" if api else "text/html",
+            body=board if api else b"<h1>Platform Engineer</h1><p>Build durable systems.</p>",
+            redirect_chain=[],
+        )
+
+    monkeypatch.setattr("countersign.activities.case_activities.fetch_url", fetch)
+    case_id = str(uuid.uuid4())
+    payload = CaseWorkflowInput(case_id=case_id, url=posting_url)
+    snapshot_source(payload)
+    normalize_case(payload)
+    assert verify_status(payload).verification.status == JobStatus.OPEN
+    with session_scope() as session:
+        reading = repo.get_page_reading(session, ids.reading_id(case_id, 1))
+        assert reading is not None and reading.adapter == "ashby: published"
+        api_ref = reading.observations[1]
+        assert api_ref.how == ObservationHow.API
+        api = repo.get_snapshot(session, api_ref.snapshot_id or "")
+        assert api is not None
+        assert (api.source_type, api.extractor_name) == ("ats_api", "ats-adapter/ashby")

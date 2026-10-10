@@ -60,7 +60,7 @@ class PageDossier(ContractModel):
     http_status: int
     text_chars: int
     # "html", "json-ld" (client-rendered page whose posting lives only in
-    # structured data), or "none".
+    # structured data), "api" (an ATS adapter's posting text), or "none".
     text_source: str
     text_excerpt: str
     # True when the excerpt is the head and tail of a longer text with a
@@ -237,6 +237,10 @@ class PageReadingRecord(ContractModel):
     authority_policy_version: str | None = None
     authority_policy_fingerprint: str | None = None
     body_text_chars: int | None = None
+    # What the ATS adapter's attempt found (ticket 003), such as "ashby:
+    # published" or "ashby: not published". None when no adapter applies to
+    # the URL, and on records written before the field existed.
+    adapter: str | None = None
 
     def body_ref(self) -> ObservationRef | None:
         """The observation reference the reading identified as the posting body."""

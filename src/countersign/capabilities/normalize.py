@@ -25,6 +25,7 @@ _ATS_HOSTS = (
     "job-boards.greenhouse.io",
     "jobs.lever.co",
     "jobs.ashbyhq.com",
+    "api.ashbyhq.com",
     "jobs.smartrecruiters.com",
 )
 
