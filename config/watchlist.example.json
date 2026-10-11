@@ -1,0 +1,13 @@
+{
+  "version": "example-1",
+  "schedule": { "cron": ["0 7 * * 1,3,5"], "time_zone": "UTC" },
+  "boards": [
+    { "adapter": "ashby", "board": "acme" },
+    { "adapter": "greenhouse", "board": "globex" }
+  ],
+  "locations": ["Remote - Canada", "Toronto", "Canada"],
+  "exclude_titles": ["Intern"],
+  "published_within_days": 14,
+  "max_new_cases_per_run": 5,
+  "max_recheck_model_calls_per_run": 30
+}

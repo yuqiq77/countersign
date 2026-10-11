@@ -7,24 +7,27 @@ link, that response becomes an OFFICIAL_ATS observation whose one control
 is the link, and verification needs no model. Every other outcome is a
 note on the reading, and the page reader runs as it always has. A posting
 missing from a healthy board is closure evidence only with a second
-observation (ADR-005); this adapter never closes on absence.
+observation (ADR-005); this adapter never closes on absence, and a
+watch recheck closes only on two consecutive ones (ADR-016).
+
+`list_board` reads the same endpoint for the scheduled watch (ticket 004).
 
 Terms policy (v4 §12, ADR-005): the job-board API is public and needs no
 credentials; Ashby documents it for populating a careers page
 (developers.ashbyhq.com/docs/public-job-posting-api), and that page states
-no further terms or rate limits. One GET per verification through the
-SSRF-guarded fetcher; nothing polls it.
+no further terms or rate limits. One GET per verification, and one per
+watched board per scheduled run, through the SSRF-guarded fetcher.
 """
 
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
-import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
-from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult
+from countersign.capabilities.ats import BoardListing, ListedPosting, fetch_board
+from countersign.capabilities.http_fetch import FetchResult
 from countersign.capabilities.normalize import host_of
 from countersign.capabilities.page_evidence import Observation
 from countersign.contracts.enums import ObservationHow, SourceAuthority
@@ -39,6 +42,9 @@ ADAPTER_NAME = "ats-adapter/ashby"
 ADAPTER_VERSION = "0.1.0"
 # Stands where a reader's prompt version would on the reading it makes.
 READING_VERSION = f"{ADAPTER_NAME}/{ADAPTER_VERSION}"
+# The note of a healthy board (at least one posting) that does not list the
+# job: the absence a watch recheck counts (ADR-016).
+NOT_PUBLISHED = "ashby: not published"
 
 
 class _Posting(BaseModel):
@@ -60,6 +66,44 @@ class _Board(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
     jobs: list[_Posting]
+
+
+class _PostalAddress(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    locality: str | None = Field(default=None, alias="addressLocality")
+    country: str | None = Field(default=None, alias="addressCountry")
+
+
+class _Address(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    postal: _PostalAddress | None = Field(default=None, alias="postalAddress")
+
+
+class _Secondary(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    location: str | None = None
+
+
+class _Listed(BaseModel):
+    """The fields of one posting the watch filters and orders by."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str
+    title: str
+    published_at: AwareDatetime = Field(alias="publishedAt")
+    location: str | None = None
+    secondary: list[_Secondary] | None = Field(default=None, alias="secondaryLocations")
+    address: _Address | None = None
+
+
+class _Listing(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    jobs: list[_Listed]
 
 
 @dataclass(frozen=True)
@@ -100,25 +144,22 @@ def lookup(page_url: str, *, fetch: Callable[[str], FetchResult]) -> AshbyLookup
     if ref is None:
         return None
     board, job_id = ref
-    try:
-        response = fetch(f"https://{API_HOST}/posting-api/job-board/{board}")
-    except (FetchPolicyError, httpx.HTTPError) as exc:
-        # A body over the cap is a policy error: unavailable, not truncated.
-        return AshbyLookup(f"ashby: unavailable ({str(exc) or type(exc).__name__})")
-    if response.http_status != 200:
-        return AshbyLookup(f"ashby: unavailable (http {response.http_status})")
-    landed = host_of(response.final_url)
-    if landed != API_HOST:
-        # The authority below is the API host's, not a redirect target's.
-        return AshbyLookup(f"ashby: unavailable (redirected to {landed})")
+    response = fetch_board(
+        f"https://{API_HOST}/posting-api/job-board/{board}", api_host=API_HOST, fetch=fetch
+    )
+    if isinstance(response, str):
+        return AshbyLookup(f"ashby: {response}")
     try:
         postings = _Board.model_validate_json(response.body).jobs
     except ValidationError:
         return AshbyLookup("ashby: unavailable (malformed response)")
+    if not postings:
+        # An empty board says nothing about one posting.
+        return AshbyLookup("ashby: unavailable (empty board)")
     wanted = (board.lower(), job_id.lower())
     posting = next((p for p in postings if _names(p.job_url, wanted)), None)
     if posting is None:
-        return AshbyLookup("ashby: not published")
+        return AshbyLookup(NOT_PUBLISHED)
     apply_url = posting.apply_url or ""
     if not apply_url.startswith(("http://", "https://")):
         return AshbyLookup("ashby: published without an apply link")
@@ -126,6 +167,47 @@ def lookup(page_url: str, *, fetch: Callable[[str], FetchResult]) -> AshbyLookup
     # recorded, not judged.
     note = "ashby: published, unlisted" if posting.is_listed is False else "ashby: published"
     return AshbyLookup(note, _observation(response, apply_url, posting.description_plain or ""))
+
+
+def list_board(board: str, *, fetch: Callable[[str], FetchResult]) -> BoardListing:
+    """Every posting the board publishes, for the watch: one GET.
+
+    The posting URL is built from the board and the job id, so it always
+    parses back to the posting it names.
+    """
+
+    response = fetch_board(
+        f"https://{API_HOST}/posting-api/job-board/{quote(board, safe='')}",
+        api_host=API_HOST,
+        fetch=fetch,
+    )
+    if isinstance(response, str):
+        return BoardListing(response)
+    try:
+        jobs = _Listing.model_validate_json(response.body).jobs
+    except ValidationError:
+        return BoardListing("unavailable (malformed response)")
+    postings = [
+        ListedPosting(
+            url=f"https://{BOARD_HOST}/{quote(board, safe='')}/{job.id}",
+            title=job.title,
+            locations=_location_texts(job),
+            published_at=job.published_at,
+        )
+        for job in jobs
+    ]
+    return BoardListing(f"http 200, {len(postings)} postings", postings)
+
+
+def _location_texts(job: _Listed) -> tuple[str, ...]:
+    postal = job.address.postal if job.address is not None else None
+    texts = [
+        job.location,
+        *(s.location for s in job.secondary or []),
+        postal.locality if postal is not None else None,
+        postal.country if postal is not None else None,
+    ]
+    return tuple(t.strip() for t in texts if t and t.strip())
 
 
 def _names(job_url: str | None, wanted: tuple[str, str]) -> bool:

@@ -22,6 +22,7 @@ from countersign.agents.page_reader import (
     add_source_dates,
     observe_response,
     read_page,
+    reread_unchanged,
 )
 from countersign.capabilities.ats import ashby
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
@@ -61,6 +62,8 @@ from countersign.contracts.workflow_io import (
     DecisionSignal,
     EvaluateOutcome,
     NormalizeOutcome,
+    RecheckInput,
+    RecheckOutcome,
     SnapshotOutcome,
     VerifyOutcome,
 )
@@ -68,6 +71,7 @@ from countersign.domain import ids
 from countersign.domain.gates import MAX_GENERATIONS, allowed_decisions_for
 from countersign.domain.states import DECISION_TO_STATE
 from countersign.domain.verification import classify_reading
+from countersign.domain.watch import RECHECK_MODEL_CALLS
 from countersign.gateway.evaluator import resolve_provider, run_evaluation
 from countersign.gateway.provider import ContractFailure, ProviderRefusal
 from countersign.persistence import repo
@@ -310,6 +314,147 @@ def _adapter_reading(
     )
 
 
+def _read(
+    url: str,
+    first: FetchResult,
+    authority_of: AuthorityFn,
+    previous: tuple[PageReadingRecord, str | None] | None = None,
+) -> tuple[ReaderResult, str | None]:
+    """The verify path's reading of a fetched page, with the adapter's note.
+
+    The Ashby API first (ticket 003); on a recheck, the previous reading
+    when the page is unchanged (ticket 004); otherwise the bounded reader.
+    """
+
+    started = time.monotonic()
+    ats = ashby.lookup(
+        first.final_url,
+        fetch=lambda url: fetch_url(url, max_body_bytes=ashby.MAX_BOARD_BYTES),
+    )
+    adapter_note = ats.note if ats is not None else None
+    if ats is not None and ats.observation is not None:
+        return _adapter_reading(first, ats.observation, ats.note, authority_of), adapter_note
+    if previous is not None:
+        page = observe_response(0, first, ObservationHow.STATIC, authority_of)
+        reused = reread_unchanged(*previous, page)
+        if reused is not None:
+            return reused, adapter_note
+    # The API attempt spent part of the reading budget, not extra time:
+    # ADR-012 sizes the Activity for one first fetch plus one reading.
+    budget = ReaderConfig().wall_clock_seconds - (time.monotonic() - started)
+    result = read_page(
+        url,
+        first=first,
+        authority_of=authority_of,
+        fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
+        render=render_url,
+        provider=resolve_provider(),
+        config=ReaderConfig(wall_clock_seconds=budget),
+    )
+    return result, adapter_note
+
+
+def _record(
+    session: Session,
+    *,
+    case_id: str,
+    url: str,
+    reading_id: str,
+    verification_id: str,
+    policy: OfficialHostPolicy | None,
+    result: ReaderResult,
+    adapter_note: str | None,
+    chosen_index: int,
+    status: JobStatus,
+    reason: str,
+) -> VerificationResult:
+    """Persist a reading's observations, the reading and its verification."""
+
+    chosen = result.observations[chosen_index]
+    closed_found = any(
+        e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
+        for e in result.evidence
+    )
+    body_text = result.observations[result.body_observation].text
+    first_snapshot = repo.body_snapshot(session, case_id)
+    first_normalized_hash: str | None = None
+    if first_snapshot is not None:
+        first_body = DatabaseBlobStore(session).get(first_snapshot.raw_object_key)
+        if first_body is not None:
+            first_normalized_hash = normalize_html(first_body).content_hash
+
+    refs: list[ObservationRef] = []
+    for obs in result.observations:
+        refs.append(
+            ObservationRef(
+                index=obs.index,
+                source_url=obs.source_url,
+                how=obs.how,
+                http_status=obs.http_status,
+                snapshot_id=_store_observation(session, case_id, obs),
+                authority=obs.authority,
+                official_host_entry=(
+                    policy.entry_for(obs.source_url) if policy is not None else None
+                ),
+            )
+        )
+    reading = PageReadingRecord(
+        reading_id=reading_id,
+        case_id=case_id,
+        url=url,
+        observations=refs,
+        body_observation=result.body_observation,
+        apply_entry=result.apply_entry,
+        evidence=result.evidence,
+        rejected_claims=result.rejected_claims,
+        steps=result.steps,
+        stop_reason=result.stop_reason,
+        prompt_version=result.prompt_version,
+        usage=result.usage,
+        read_at=repo.utcnow(),
+        notes=result.notes,
+        authority_policy_version=policy.version if policy is not None else None,
+        authority_policy_fingerprint=policy.fingerprint if policy is not None else None,
+        body_text_chars=len(body_text),
+        adapter=adapter_note,
+    )
+    repo.record_page_reading(session, reading)
+
+    content_changed = (
+        None
+        if first_normalized_hash is None
+        else result.observations[result.body_observation].normalized_hash != first_normalized_hash
+    )
+    verification = VerificationResult(
+        case_id=case_id,
+        status=status,
+        authority=chosen.authority,
+        checked_at=repo.utcnow(),
+        http_status=chosen.http_status,
+        final_url=chosen.source_url,
+        reason=reason,
+        apply_markers_found=(
+            result.apply_entry is not None and result.apply_entry.observation == chosen_index
+        ),
+        closed_markers_found=closed_found,
+        observed_content_hash=chosen.normalized_hash,
+        content_changed=content_changed,
+        snapshot_id=refs[chosen_index].snapshot_id,
+        reading_id=reading_id,
+    )
+    repo.record_verification(session, verification_id=verification_id, result=verification)
+    return verification
+
+
+def _classify(result: ReaderResult) -> tuple[int, JobStatus, str]:
+    return classify_reading(
+        [o.dossier() for o in result.observations],
+        result.apply_entry,
+        result.evidence,
+        now=repo.utcnow(),
+    )
+
+
 @activity.defn(name="verify_status")
 def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
     """Second observation of the source, read by the bounded page reader.
@@ -354,109 +499,22 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
 
     policy, authority_of = _authority_policy()
     first = _fetch(payload.url)
-    started = time.monotonic()
-    ats = ashby.lookup(
-        first.final_url,
-        fetch=lambda url: fetch_url(url, max_body_bytes=ashby.MAX_BOARD_BYTES),
-    )
-    adapter_note = ats.note if ats is not None else None
-    if ats is not None and ats.observation is not None:
-        result = _adapter_reading(first, ats.observation, ats.note, authority_of)
-    else:
-        # The API attempt spent part of the reading budget, not extra time:
-        # ADR-012 sizes the Activity for one first fetch plus one reading.
-        budget = ReaderConfig().wall_clock_seconds - (time.monotonic() - started)
-        result = read_page(
-            payload.url,
-            first=first,
-            authority_of=authority_of,
-            fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
-            render=render_url,
-            provider=resolve_provider(),
-            config=ReaderConfig(wall_clock_seconds=budget),
-        )
-    chosen_index, status, reason = classify_reading(
-        [o.dossier() for o in result.observations],
-        result.apply_entry,
-        result.evidence,
-        now=repo.utcnow(),
-    )
-    chosen = result.observations[chosen_index]
-    closed_found = any(
-        e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
-        for e in result.evidence
-    )
-    body_text = result.observations[result.body_observation].text
-
+    result, adapter_note = _read(payload.url, first, authority_of)
+    chosen_index, status, reason = _classify(result)
     with session_scope() as session:
-        first_snapshot = repo.body_snapshot(session, payload.case_id)
-        first_normalized_hash: str | None = None
-        if first_snapshot is not None:
-            first_body = DatabaseBlobStore(session).get(first_snapshot.raw_object_key)
-            if first_body is not None:
-                first_normalized_hash = normalize_html(first_body).content_hash
-
-        refs: list[ObservationRef] = []
-        for obs in result.observations:
-            refs.append(
-                ObservationRef(
-                    index=obs.index,
-                    source_url=obs.source_url,
-                    how=obs.how,
-                    http_status=obs.http_status,
-                    snapshot_id=_store_observation(session, payload.case_id, obs),
-                    authority=obs.authority,
-                    official_host_entry=(
-                        policy.entry_for(obs.source_url) if policy is not None else None
-                    ),
-                )
-            )
-        reading = PageReadingRecord(
-            reading_id=reading_id,
+        verification = _record(
+            session,
             case_id=payload.case_id,
             url=payload.url,
-            observations=refs,
-            body_observation=result.body_observation,
-            apply_entry=result.apply_entry,
-            evidence=result.evidence,
-            rejected_claims=result.rejected_claims,
-            steps=result.steps,
-            stop_reason=result.stop_reason,
-            prompt_version=result.prompt_version,
-            usage=result.usage,
-            read_at=repo.utcnow(),
-            notes=result.notes,
-            authority_policy_version=policy.version if policy is not None else None,
-            authority_policy_fingerprint=policy.fingerprint if policy is not None else None,
-            body_text_chars=len(body_text),
-            adapter=adapter_note,
-        )
-        repo.record_page_reading(session, reading)
-
-        content_changed = (
-            None
-            if first_normalized_hash is None
-            else result.observations[result.body_observation].normalized_hash
-            != first_normalized_hash
-        )
-        verification = VerificationResult(
-            case_id=payload.case_id,
-            status=status,
-            authority=chosen.authority,
-            checked_at=repo.utcnow(),
-            http_status=chosen.http_status,
-            final_url=chosen.source_url,
-            reason=reason,
-            apply_markers_found=(
-                result.apply_entry is not None and result.apply_entry.observation == chosen_index
-            ),
-            closed_markers_found=closed_found,
-            observed_content_hash=chosen.normalized_hash,
-            content_changed=content_changed,
-            snapshot_id=refs[chosen_index].snapshot_id,
             reading_id=reading_id,
+            verification_id=verification_id,
+            policy=policy,
+            result=result,
+            adapter_note=adapter_note,
+            chosen_index=chosen_index,
+            status=status,
+            reason=reason,
         )
-        repo.record_verification(session, verification_id=verification_id, result=verification)
         repo.transition_case(
             session,
             case_id=payload.case_id,
@@ -493,6 +551,103 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
         return VerifyOutcome(
             verification=stored, observed_text_chars=_stored_body_text_chars(session, stored)
         )
+
+
+# Stored as a verification's reason, and the next recheck compares against
+# it: rewording it restarts the chain for cases already waiting on it.
+BOARD_ABSENCE = "absent from its ATS board and no JobPosting on the page"
+BOARD_ABSENCE_AGAIN = f"{BOARD_ABSENCE} on two consecutive rechecks"
+
+
+@activity.defn(name="recheck_case")
+def recheck_case(payload: RecheckInput) -> RecheckOutcome:
+    """Verify a pending case again for the watch, without a state transition (ADR-016).
+
+    The verify path under run-derived ids; a page whose text hash and
+    cited claims are unchanged is decided again without the model. An
+    Ashby posting absent from its healthy board while no observation shows
+    a JobPosting is UNVERIFIED with that reason, or CLOSED when the case's
+    preceding verification recorded the same absence. Nothing is written
+    unless the case still waits on the same approval request; the watch
+    run sends any closure to the case's workflow.
+    """
+
+    reading_id = ids.recheck_reading_id(payload.case_id, payload.generation, payload.run_key)
+    verification_id = ids.recheck_verification_id(
+        payload.case_id, payload.generation, payload.run_key
+    )
+    with session_scope() as session:
+        stored = repo.get_verification(session, verification_id)
+        if stored is not None:
+            # The attempt that wrote it did not record its call count:
+            # charge the worst case whenever it asked a model. Usage cannot
+            # tell, since calls that all failed validation leave none; every
+            # model step does leave a step from 1 on (adapter and unchanged
+            # readings have only step 0).
+            reading = repo.get_page_reading(session, reading_id)
+            asked = reading is not None and any(s.step > 0 for s in reading.steps)
+            calls = RECHECK_MODEL_CALLS if asked else 0
+            return RecheckOutcome(
+                recorded=True, model_calls=calls, status=stored.status, reason=stored.reason
+            )
+        previous = repo.latest_verification(session, payload.case_id)
+        previous_reading = (
+            repo.get_page_reading(session, previous.reading_id)
+            if previous is not None and previous.reading_id is not None
+            else None
+        )
+
+    policy, authority_of = _authority_policy()
+    first = _fetch(payload.url)
+    result, adapter_note = _read(
+        payload.url,
+        first,
+        authority_of,
+        previous=(
+            (previous_reading, previous.observed_content_hash)
+            if previous is not None and previous_reading is not None
+            else None
+        ),
+    )
+    chosen_index, status, reason = _classify(result)
+    if (
+        status not in (JobStatus.CLOSED, JobStatus.EXPIRED)
+        and adapter_note == ashby.NOT_PUBLISHED
+        and all(o.jsonld is None for o in result.observations)
+    ):
+        if previous is not None and previous.reason == BOARD_ABSENCE:
+            status, reason = JobStatus.CLOSED, BOARD_ABSENCE_AGAIN
+        else:
+            status, reason = JobStatus.UNVERIFIED, BOARD_ABSENCE
+    with session_scope() as session:
+        if not repo.awaits_decision(session, payload.case_id, payload.approval_request_id):
+            return RecheckOutcome(recorded=False, model_calls=result.model_calls)
+        _record(
+            session,
+            case_id=payload.case_id,
+            url=payload.url,
+            reading_id=reading_id,
+            verification_id=verification_id,
+            policy=policy,
+            result=result,
+            adapter_note=adapter_note,
+            chosen_index=chosen_index,
+            status=status,
+            reason=reason,
+        )
+        # Another attempt may have committed this id first; its record stands.
+        stored = repo.get_verification(session, verification_id)
+        assert stored is not None
+    activity.logger.info(
+        "recheck: %s status=%s calls=%d adapter=%s",
+        payload.case_id,
+        stored.status.value,
+        result.model_calls,
+        adapter_note,
+    )
+    return RecheckOutcome(
+        recorded=True, model_calls=result.model_calls, status=stored.status, reason=stored.reason
+    )
 
 
 @activity.defn(name="evaluate_case")
@@ -770,4 +925,5 @@ ALL_ACTIVITIES = [
     mark_needs_evidence,
     quarantine_case,
     expire_approval,
+    recheck_case,
 ]

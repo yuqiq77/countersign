@@ -12,6 +12,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
 from support import start_case, time_skipping_env, wait_for_pending_approval
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -29,10 +30,12 @@ from countersign.contracts.workflow_io import (
     ApprovalRequestOutcome,
     CaseStateNote,
     CaseWorkflowInput,
+    CaseWorkflowResult,
     DecisionSignal,
     EvaluateOutcome,
     NormalizeOutcome,
     SnapshotOutcome,
+    SourceClosedSignal,
     VerifyOutcome,
 )
 from countersign.domain.gates import MAX_GENERATIONS
@@ -50,6 +53,7 @@ class Recorder:
 
     def __init__(self) -> None:
         self.calls: dict[str, int] = {}
+        self.expired: list[CaseStateNote] = []
 
     def hit(self, name: str) -> None:
         self.calls[name] = self.calls.get(name, 0) + 1
@@ -64,6 +68,7 @@ def make_activities(
     approval_ttl: timedelta = timedelta(days=7),
     observed_text_chars: int = 1200,
     round_two_barrier: tuple[asyncio.Event, asyncio.Event] | None = None,
+    outcome_gate: asyncio.Event | None = None,
 ) -> list[ActivityFn]:
     def snapshot_record(case_id: str) -> SnapshotRecord:
         return SnapshotRecord(
@@ -158,6 +163,8 @@ def make_activities(
     @activity.defn(name="finalize_decision")
     async def finalize_decision(signal: DecisionSignal) -> None:
         recorder.hit("finalize_decision")
+        if outcome_gate is not None:
+            await outcome_gate.wait()
 
     @activity.defn(name="mark_closed")
     async def mark_closed(note: CaseStateNote) -> None:
@@ -174,6 +181,9 @@ def make_activities(
     @activity.defn(name="expire_approval")
     async def expire_approval(note: CaseStateNote) -> None:
         recorder.hit("expire_approval")
+        recorder.expired.append(note)
+        if outcome_gate is not None:
+            await outcome_gate.wait()
 
     return [
         snapshot_source,
@@ -415,3 +425,78 @@ async def test_request_evidence_at_the_round_cap_ends_the_case() -> None:
     assert "snapshot_source" not in recorder.calls  # a later round re-observes via verify
     assert recorder.calls["verify_status"] == 1
     assert recorder.calls["finalize_decision"] == 1
+
+
+async def _settle_the_wait(*sent: str) -> tuple[CaseWorkflowResult, str, Recorder]:
+    """Run a case to its approval wait and send the named Signals in order.
+
+    The outcome Activity is held until every Signal is in, so each one
+    reaches a running case whatever the first one started.
+    """
+
+    recorder = Recorder()
+    queue = f"test-{uuid.uuid4()}"
+    gate = asyncio.Event()
+    async with await time_skipping_env() as env:
+        async with Worker(
+            env.client,
+            task_queue=queue,
+            workflows=[JobIntelligenceWorkflow],
+            activities=make_activities(recorder, outcome_gate=gate),
+        ):
+            handle = await start_case(env, queue)
+            status = await wait_for_pending_approval(handle)
+            approval_id = status.approval_request_id
+            assert approval_id is not None
+            signals = {
+                "closure": (
+                    "source_closed",
+                    SourceClosedSignal(approval_request_id=approval_id, reason="posting gone"),
+                ),
+                "closure for another request": (
+                    "source_closed",
+                    SourceClosedSignal(
+                        approval_request_id=approval_request_id(status.case_id, 2),
+                        reason="posting gone",
+                    ),
+                ),
+                "decision": (
+                    "submit_decision",
+                    _signal(approval_id, ApprovalDecision.APPROVE, "apply"),
+                ),
+            }
+            for name in sent:
+                kind, payload = signals[name]
+                await handle.signal(kind, payload)
+            gate.set()
+            result = await handle.result()
+    return result, approval_id, recorder
+
+
+async def test_a_closure_ends_the_waiting_case_and_a_later_decision_is_dropped() -> None:
+    """ADR-016: a watch recheck's closure takes the approval wait's one
+    outcome slot and expires the approval with the recheck's reason."""
+
+    result, approval_id, recorder = await _settle_the_wait("closure", "decision")
+    assert result.final_state == CaseState.CLOSED_OR_STALE
+    assert result.decision is None
+    assert recorder.expired == [
+        CaseStateNote(
+            case_id=result.case_id,
+            reason="source closed on recheck: posting gone",
+            approval_request_id=approval_id,
+        )
+    ]
+    assert "finalize_decision" not in recorder.calls
+
+
+@pytest.mark.parametrize(
+    "sent", [("decision", "closure"), ("closure for another request", "decision")]
+)
+async def test_a_closure_after_the_decision_or_for_another_request_is_dropped(
+    sent: tuple[str, str],
+) -> None:
+    result, _, recorder = await _settle_the_wait(*sent)
+    assert result.final_state == CaseState.APPROVED
+    assert recorder.calls["finalize_decision"] == 1
+    assert recorder.expired == []

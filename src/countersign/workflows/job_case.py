@@ -25,6 +25,7 @@ with workflow.unsafe.imports_passed_through():
         EvaluateOutcome,
         NormalizeOutcome,
         SnapshotOutcome,
+        SourceClosedSignal,
         VerifyOutcome,
     )
     from countersign.domain.gates import MAX_GENERATIONS
@@ -66,7 +67,10 @@ class JobIntelligenceWorkflow:
         self._case_id: str = ""
         self._generation: int = 1
         self._approval_request_id: str | None = None
+        # One outcome slot for the approval wait: the reviewer's decision or a
+        # watch recheck's closure (ADR-016), whichever arrives first.
         self._decision: DecisionSignal | None = None
+        self._closure: SourceClosedSignal | None = None
 
     async def _quarantine(self, payload: CaseWorkflowInput, reason: str) -> CaseWorkflowResult:
         await workflow.execute_activity(
@@ -196,13 +200,33 @@ class JobIntelligenceWorkflow:
         remaining = approval.expires_at - workflow.now()
         timeout = max(remaining, timedelta(seconds=1))
         try:
-            await workflow.wait_condition(lambda: self._decision is not None, timeout=timeout)
+            await workflow.wait_condition(
+                lambda: self._decision is not None or self._closure is not None, timeout=timeout
+            )
         except TimeoutError:
             await workflow.execute_activity(
                 "expire_approval",
                 CaseStateNote(
                     case_id=payload.case_id,
                     reason="approval expired without a decision",
+                    approval_request_id=approval.approval_request_id,
+                ),
+                start_to_close_timeout=_ACTIVITY_TIMEOUT,
+                retry_policy=_RETRY,
+            )
+            self._state = CaseState.CLOSED_OR_STALE
+            return CaseWorkflowResult(
+                case_id=payload.case_id,
+                final_state=CaseState.CLOSED_OR_STALE,
+                decision=None,
+            )
+
+        if self._closure is not None:
+            await workflow.execute_activity(
+                "expire_approval",
+                CaseStateNote(
+                    case_id=payload.case_id,
+                    reason=f"source closed on recheck: {self._closure.reason}",
                     approval_request_id=approval.approval_request_id,
                 ),
                 start_to_close_timeout=_ACTIVITY_TIMEOUT,
@@ -250,16 +274,31 @@ class JobIntelligenceWorkflow:
     def submit_decision(self, signal: DecisionSignal) -> None:
         """Record the first decision for this round's approval request.
 
-        Duplicates are harmless. A Signal for another approval request —
-        a late one from the previous round after continue-as-new, or any
-        Signal before this run knows its own request id — is dropped.
+        Duplicates are harmless, and so is a decision after a closure. A
+        Signal for another approval request — a late one from the previous
+        round after continue-as-new, or any Signal before this run knows its
+        own request id — is dropped.
         """
 
-        if self._decision is not None:
+        if self._decision is not None or self._closure is not None:
             return
         if signal.approval_request_id != self._approval_request_id:
             return
         self._decision = signal
+
+    @workflow.signal(name="source_closed")
+    def source_closed(self, signal: SourceClosedSignal) -> None:
+        """Take a watch recheck's closure for this round's approval request.
+
+        It shares the decision's slot: the first of the two to arrive wins,
+        and a closure for another request is dropped (ADR-016).
+        """
+
+        if self._decision is not None or self._closure is not None:
+            return
+        if signal.approval_request_id != self._approval_request_id:
+            return
+        self._closure = signal
 
     @workflow.query(name="status")
     def status(self) -> CaseWorkflowStatus:

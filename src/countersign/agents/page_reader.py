@@ -30,6 +30,7 @@ from countersign.contracts.page_reading import (
     PageDossier,
     PageEvidence,
     PageReading,
+    PageReadingRecord,
     PageStep,
     RejectedClaim,
     StepLog,
@@ -369,6 +370,55 @@ def add_source_dates(observations: list[Observation], evidence: list[PageEvidenc
                         observation=obs.index,
                     )
                 )
+
+
+def reread_unchanged(
+    previous: PageReadingRecord, previous_hash: str | None, first: Observation
+) -> ReaderResult | None:
+    """The previous reading's claims on an unchanged page, without the model (ticket 004).
+
+    A watch recheck reuses a reading only when the page's normalized text
+    hash equals the one its last verification recorded and the previous
+    claims still bind on the fresh observation under the same citation
+    check (label and target). Only a completed reading whose body and
+    claims all sit on its first observation can be checked that way. The
+    caller's decision table then runs at the current time, so a deadline
+    that has passed since still decides.
+    """
+
+    entry = previous.apply_entry
+    if (
+        previous.stop_reason != ReaderStop.DONE
+        or previous.body_observation != 0
+        or (entry is not None and entry.observation != 0)
+        or any(e.observation != 0 for e in previous.evidence)
+        or first.normalized_hash != previous_hash
+    ):
+        return None
+    claims = PageReading(
+        body_observation=0,
+        apply_entry=entry if entry is not None else ApplyEntry(kind=ApplyEntryKind.NONE),
+        evidence=previous.evidence,
+    )
+    _, bound, evidence, rejected = _verify_reading(claims, [first])
+    if rejected:
+        return None
+    add_source_dates([first], evidence)
+    return ReaderResult(
+        observations=[first],
+        body_observation=0,
+        apply_entry=bound,
+        evidence=evidence,
+        rejected_claims=[],
+        steps=[
+            StepLog(
+                step=0, action=ReaderAction.DONE, outcome=f"unchanged since {previous.reading_id}"
+            )
+        ],
+        stop_reason=ReaderStop.DONE,
+        usage=None,
+        prompt_version=previous.prompt_version,
+    )
 
 
 def _proposed(rejected: list[RejectedClaim]) -> str:

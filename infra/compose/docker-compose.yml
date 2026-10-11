@@ -100,6 +100,9 @@ services:
       # Official-host mapping (ticket 002), same convention: a JSON file under
       # config/operator/, blank means no mapping. See config/official-hosts.example.json.
       COUNTERSIGN_OFFICIAL_HOSTS_PATH: ${COUNTERSIGN_OFFICIAL_HOSTS_PATH:-}
+      # Watchlist (ticket 004), same convention: blank means no watch and a
+      # paused Schedule. See config/watchlist.example.json.
+      COUNTERSIGN_WATCHLIST_PATH: ${COUNTERSIGN_WATCHLIST_PATH:-}
       # The image installs Chromium through Playwright (see Dockerfile) and
       # links it here. Fixed on purpose: a host value in .env names a host
       # binary that does not exist inside the container.

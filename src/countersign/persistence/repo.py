@@ -106,7 +106,13 @@ def append_audit(
 
 
 def create_case(
-    session: Session, *, case_id: str, url: str, request_id: str | None = None
+    session: Session,
+    *,
+    case_id: str,
+    url: str,
+    request_id: str | None = None,
+    actor_type: ActorType = ActorType.HUMAN,
+    actor_id: str = "admin",
 ) -> JobCaseRow:
     """Create a case in DISCOVERED, or return the existing row (idempotent)."""
 
@@ -128,8 +134,8 @@ def create_case(
     append_audit(
         session,
         audit_id=f"aud-case-created-{case_id}",
-        actor_type=ActorType.HUMAN,
-        actor_id="admin",
+        actor_type=actor_type,
+        actor_id=actor_id,
         action="case.created",
         resource_type="job_case",
         resource_id=case_id,
@@ -672,6 +678,39 @@ def in_flight(session: Session, case_id: str) -> bool:
         round_continued(session, case_id, next_generation)
         and session.get(VerificationRow, verification_id(case_id, next_generation)) is None
     )
+
+
+def awaits_decision(session: Session, case_id: str, approval_request_id: str) -> bool:
+    """Whether the case is still PENDING_APPROVAL on this pending request (ADR-016)."""
+
+    row = session.get(JobCaseRow, case_id)
+    request = session.get(ApprovalRequestRow, approval_request_id)
+    return (
+        row is not None
+        and row.state == CaseState.PENDING_APPROVAL.value
+        and request is not None
+        and request.case_id == case_id
+        and request.status == ApprovalRequestStatus.PENDING.value
+    )
+
+
+def recheck_candidates(
+    session: Session, before: datetime
+) -> list[tuple[JobCaseRow, ApprovalRequestRow]]:
+    """Cases waiting on a pending approval whose latest verification
+    predates `before`, oldest verification first (ADR-016)."""
+
+    due: list[tuple[datetime, JobCaseRow, ApprovalRequestRow]] = []
+    stmt = select(JobCaseRow).where(JobCaseRow.state == CaseState.PENDING_APPROVAL.value)
+    for row in session.scalars(stmt):
+        approval = approval_for_case(session, row.id)
+        latest = _latest_verification_row(session, row.id)
+        if approval is None or approval.status != ApprovalRequestStatus.PENDING.value:
+            continue
+        if latest is not None and ensure_utc(latest.checked_at) < before:
+            due.append((ensure_utc(latest.checked_at), row, approval))
+    due.sort(key=lambda item: item[0])
+    return [(row, approval) for _, row, approval in due]
 
 
 def get_decision(

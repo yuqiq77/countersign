@@ -12,20 +12,23 @@ from countersign.gateway.evaluator import profile_fingerprint
 from countersign.policy.defaults import EXAMPLE_BANDS, salary_bands
 from countersign.policy.official_hosts import OFFICIAL_HOSTS_PATH_VAR, load_official_hosts
 from countersign.policy.operator_profile import PROFILE_PATH_VAR, load_operator_profile
-from countersign.runtime import TASK_QUEUE, connect_client
+from countersign.policy.watchlist import WATCHLIST_PATH_VAR, WatchPolicy, load_watchlist
+from countersign.runtime import TASK_QUEUE, connect_client, sync_watch_schedule
 from countersign.workflows.job_case import JobIntelligenceWorkflow
+from countersign.workflows.watch import WatchWorkflow
 
 _log = logging.getLogger(__name__)
 
 
-async def main() -> None:
+async def main(watch: WatchPolicy | None) -> None:
     client = await connect_client()
+    await sync_watch_schedule(client, watch)
     _log.info("worker up: task_queue=%s", TASK_QUEUE)
     with ThreadPoolExecutor(max_workers=8) as executor:
         worker = Worker(
             client,
             task_queue=TASK_QUEUE,
-            workflows=[JobIntelligenceWorkflow],
+            workflows=[JobIntelligenceWorkflow, WatchWorkflow],
             activities=list(ALL_ACTIVITIES),
             activity_executor=executor,
         )
@@ -45,6 +48,7 @@ def run() -> None:
         bands = salary_bands()
         profile = load_operator_profile()
         official_hosts = load_official_hosts()
+        watch = load_watchlist()
     except ValueError as exc:
         _log.error("refusing to start: %s", exc)
         raise SystemExit(2) from exc
@@ -78,6 +82,16 @@ def run() -> None:
             official_hosts.version,
             official_hosts.fingerprint,
         )
+    if watch is None:
+        _log.info("watch: not configured (%s unset); the Schedule is paused", WATCHLIST_PATH_VAR)
+    else:
+        # Identity and counts only: the boards are operator-private.
+        _log.info(
+            "watch: %d boards, version=%s, fingerprint=%s",
+            len(watch.watchlist.boards),
+            watch.watchlist.version,
+            watch.fingerprint,
+        )
     if bands is EXAMPLE_BANDS:
         _log.warning(
             "salary bands: operator bands not configured; using the generic %s example, "
@@ -86,7 +100,7 @@ def run() -> None:
         )
     else:
         _log.info("salary bands: operator-configured, currency=%s", bands.currency)
-    asyncio.run(main())
+    asyncio.run(main(watch))
 
 
 if __name__ == "__main__":

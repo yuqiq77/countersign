@@ -161,6 +161,7 @@ def _silent_timeout(request: httpx.Request) -> httpx.Response:
     ("handler", "note"),
     [
         (_serving(_board()), "ashby: not published"),
+        (_serving(b'{"apiVersion": "1", "jobs": []}'), "ashby: unavailable (empty board)"),
         (_serving(b'{"message": "not found"}', 404), "ashby: unavailable (http 404)"),
         (_serving(b"<html>maintenance</html>"), "ashby: unavailable (malformed response)"),
         (_serving(b'{"jobs": [{"isListed": "yes"}]}'), "ashby: unavailable (malformed response)"),

@@ -193,3 +193,146 @@ def test_an_ashby_api_reading_persists_within_column_widths(
         api = repo.get_snapshot(session, api_ref.snapshot_id or "")
         assert api is not None
         assert (api.source_type, api.extractor_name) == ("ats_api", "ats-adapter/ashby")
+
+
+@pytest.mark.usefixtures("postgres_db")
+def test_the_watchs_records_persist_within_column_widths() -> None:
+    """Ticket 004 on the deployment engine: a watch-created case, a recheck's
+    run-derived verification and reading ids and the run's audit events fit
+    PostgreSQL's widths, and the recheck queries compare aware timestamps."""
+
+    from countersign.activities.case_activities import BOARD_ABSENCE
+    from countersign.capabilities.ats import ashby
+    from countersign.contracts.enums import JobStatus, ObservationHow, ReaderStop, SourceAuthority
+    from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
+    from countersign.contracts.verification import VerificationResult
+    from countersign.contracts.workflow_io import WatchRunSummary
+    from countersign.domain import ids
+    from countersign.persistence.models import AuditEventRow
+
+    run_key = "abcd1234"
+    url = "https://jobs.ashbyhq.com/acme/4c1d7e2a-5b6f-4a8e-9d3c-2b1a0f9e8d7c"
+    case_id = str(uuid.uuid4())
+    reading_id = ids.recheck_reading_id(case_id, 999, run_key)
+    verification_id = ids.recheck_verification_id(case_id, 999, run_key)
+    verification = VerificationResult(
+        case_id=case_id,
+        status=JobStatus.UNVERIFIED,
+        authority=SourceAuthority.OFFICIAL_ATS,
+        checked_at=repo.utcnow(),
+        http_status=200,
+        final_url=url,
+        reason=BOARD_ABSENCE,
+        apply_markers_found=False,
+        closed_markers_found=False,
+        reading_id=reading_id,
+    )
+    summary = WatchRunSummary(
+        run_key=run_key,
+        watchlist_version="2026-10-01",
+        watchlist_fingerprint="0123abcd",
+        boards=["ashby/acme: published", "greenhouse/acme: published"],
+        seen=42,
+        filtered=30,
+        without_location=2,
+        known=9,
+        outside_window=1,
+        reappeared=1,
+        created=2,
+        rechecked=1,
+        rechecked_without_model=1,
+        closed=0,
+        recheck_failures=0,
+        recheck_model_calls=0,
+        new_case_model_calls=8,
+    )
+    with session_scope() as session:
+        repo.create_case(
+            session,
+            case_id=case_id,
+            url=url,
+            request_id=run_key,
+            actor_type=ActorType.SYSTEM,
+            actor_id="watch",
+        )
+        for state in (
+            CaseState.SNAPSHOTTED,
+            CaseState.NORMALIZED,
+            CaseState.DEDUPLICATED,
+            CaseState.OFFICIAL_SOURCE_VERIFIED,
+            CaseState.EVALUATED,
+            CaseState.PENDING_APPROVAL,
+        ):
+            repo.transition_case(
+                session,
+                case_id=case_id,
+                new_state=state,
+                actor_type=ActorType.SERVICE,
+                actor_id="worker",
+            )
+        approval_id = repo.create_approval_request(
+            session,
+            case_id=case_id,
+            generation=1,
+            allowed=[ApprovalDecision.APPROVE],
+            expires_at=repo.utcnow() + timedelta(days=7),
+        ).id
+        repo.record_page_reading(
+            session,
+            PageReadingRecord(
+                reading_id=reading_id,
+                case_id=case_id,
+                url=url,
+                observations=[
+                    ObservationRef(
+                        index=0,
+                        source_url=url,
+                        how=ObservationHow.STATIC,
+                        http_status=200,
+                        authority=SourceAuthority.OFFICIAL_ATS,
+                    )
+                ],
+                body_observation=0,
+                apply_entry=None,
+                evidence=[],
+                rejected_claims=[],
+                steps=[],
+                stop_reason=ReaderStop.DONE,
+                prompt_version="page-reader/0.5.0",
+                usage=None,
+                read_at=repo.utcnow(),
+                adapter=ashby.NOT_PUBLISHED,
+            ),
+        )
+        repo.record_verification(session, verification_id=verification_id, result=verification)
+        repo.append_audit(
+            session,
+            audit_id=f"aud-case-reappeared-{case_id}",
+            actor_type=ActorType.SYSTEM,
+            actor_id="watch",
+            action="case.reappeared",
+            resource_type="job_case",
+            resource_id=case_id,
+            reason="listed again, published 2026-10-11T07:00:00+00:00",
+            workflow_id="countersign-watch-2026-10-11T07:00:00Z",
+        )
+        repo.append_audit(
+            session,
+            audit_id=f"aud-watch-run-{run_key}",
+            actor_type=ActorType.SYSTEM,
+            actor_id="watch",
+            action="watch.run",
+            resource_type="watch_run",
+            resource_id=run_key,
+            reason=summary.model_dump_json(),
+            workflow_id="countersign-watch-2026-10-11T07:00:00Z",
+            request_id=run_key,
+        )
+    with session_scope() as session:
+        assert repo.get_verification(session, verification_id) == verification
+        run = session.get(AuditEventRow, f"aud-watch-run-{run_key}")
+        assert run is not None and WatchRunSummary.model_validate_json(run.reason or "") == summary
+        due = repo.recheck_candidates(session, before=repo.utcnow() + timedelta(minutes=1))
+        assert (case_id, approval_id) in [(row.id, approval.id) for row, approval in due]
+        assert repo.awaits_decision(session, case_id, approval_id)
+        assert not repo.awaits_decision(session, case_id, ids.approval_request_id(case_id, 2))

@@ -1,14 +1,22 @@
 """The bounded page reader: budgets, citation checks, allowed moves, and conservative failures."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
 
-from countersign.agents.page_reader import ReaderConfig, ReaderResult, cites, read_page
+from countersign.agents.page_reader import (
+    ReaderConfig,
+    ReaderResult,
+    cites,
+    read_page,
+    reread_unchanged,
+)
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult
 from countersign.capabilities.normalize import classify_authority
-from countersign.capabilities.page_evidence import observe
+from countersign.capabilities.page_evidence import Observation, observe
 from countersign.contracts.base import ContractModel
 from countersign.contracts.enums import (
     ApplyEntryKind,
@@ -20,8 +28,10 @@ from countersign.contracts.enums import (
 )
 from countersign.contracts.page_reading import (
     ApplyEntry,
+    ObservationRef,
     PageEvidence,
     PageReading,
+    PageReadingRecord,
     PageStep,
 )
 from countersign.gateway.fake_provider import FakeEvaluationProvider
@@ -927,3 +937,63 @@ def test_dossier_shows_jsonld_under_the_source_names() -> None:
     prompt = build_user_prompt([obs.dossier()], [], ReaderConfig())
     assert '"directApply": true' in prompt and '"validThrough": "2030-01-31"' in prompt
     assert "direct_apply" not in prompt and "valid_through" not in prompt
+
+
+# --- unchanged-page reread (ticket 004) ----------------------------------
+
+_PREVIOUS = PageReadingRecord(
+    reading_id="read-c1-g1",
+    case_id="c1",
+    url=ATS_URL,
+    observations=[
+        ObservationRef(index=0, source_url=ATS_URL, how=ObservationHow.STATIC, http_status=200)
+    ],
+    body_observation=0,
+    apply_entry=_RECITED.apply_entry,
+    evidence=[],
+    rejected_claims=[],
+    steps=[],
+    stop_reason=ReaderStop.DONE,
+    prompt_version="page-reader/0.4.0",
+    usage=None,
+    read_at=datetime(2026, 10, 1, tzinfo=UTC),
+)
+
+
+def _fresh(html: bytes = ATS_HTML) -> Observation:
+    return observe(
+        index=0,
+        source_url=ATS_URL,
+        how=ObservationHow.STATIC,
+        authority=SourceAuthority.OFFICIAL_ATS,
+        http_status=200,
+        body=html,
+    )
+
+
+def test_an_unchanged_page_keeps_the_previous_reading_without_the_model() -> None:
+    page = _fresh()
+    result = reread_unchanged(_PREVIOUS, page.normalized_hash, page)
+    assert result is not None
+    assert (result.stop_reason, result.usage, result.model_calls) == (ReaderStop.DONE, None, 0)
+    assert result.prompt_version == "page-reader/0.4.0"
+    assert result.observations == [page]
+    assert result.apply_entry == _RECITED.apply_entry
+    assert [s.outcome for s in result.steps] == ["unchanged since read-c1-g1"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "html"),
+    [
+        ({}, ATS_HTML.replace(b"/acme/jobs/1/apply", b"/acme/jobs/1/apply?v=2")),  # href only
+        ({}, ATS_HTML.replace(b"Python", b"Rust")),  # text hash
+        ({"body_observation": 1}, ATS_HTML),
+        ({"apply_entry": _RECITED.apply_entry.model_copy(update={"observation": 1})}, ATS_HTML),
+        ({"stop_reason": ReaderStop.STEP_BUDGET}, ATS_HTML),
+    ],
+)
+def test_a_changed_page_or_an_uncheckable_reading_is_read_again(
+    changes: dict[str, Any], html: bytes
+) -> None:
+    previous = _PREVIOUS.model_copy(update=changes)
+    assert reread_unchanged(previous, _fresh().normalized_hash, _fresh(html)) is None
