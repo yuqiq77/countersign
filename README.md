@@ -84,8 +84,8 @@ It has one operator and a small, real workload, so it says nothing about
 scale (traffic, concurrency, horizontal scaling), multi-user security or
 team engineering process. Self-hosted Temporal on one host shows recovery
 from a worker crash, not host failover. Planned pieces that are not built
-yet, including scheduled scans and rechecks, authorization, traces, cost
-dashboards and evals, are listed under [Current scope](#current-scope).
+yet, including authorization, traces, cost dashboards and evals, are
+listed under [Current scope](#current-scope).
 
 ## Architecture at a glance
 
@@ -127,6 +127,7 @@ Important import boundaries: `countersign.domain` may import only `countersign.c
 - [ADR-013 — Human attestation for unverified postings](docs/adr/013-human-attestation-for-unverified-postings.md)
 - [ADR-014 — Evidence loop through REQUEST_EVIDENCE](docs/adr/014-evidence-loop-through-request-evidence.md)
 - [ADR-015 — Render network policy](docs/adr/015-render-network-policy.md)
+- [ADR-016 — Scheduled watch](docs/adr/016-scheduled-watch.md)
 
 ## Local checks
 
@@ -190,8 +191,8 @@ resume with no duplicate snapshot, evaluation, or audit event.
 
 ## Current scope
 
-Implemented (Slice 1 core plus Slice 2 official-host mapping and the
-Ashby adapter):
+Implemented (Slice 1 core plus Slice 2 official-host mapping, the
+Ashby adapter and the scheduled watch):
 
 - paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
 - `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
@@ -230,8 +231,22 @@ Ashby adapter):
   from that OFFICIAL_ATS response without a model call, while the page's
   own 404/410 or past `validThrough` still decides; an absent posting,
   an unavailable, oversized or malformed response leaves the reading to
-  the page reader, and the reading records the outcome. Absence never
-  closes a posting; no discovery or polling;
+  the page reader, and the reading records the outcome. Absence alone
+  never closes a posting at verification;
+- a scheduled watch ([ticket 004](docs/tickets/004-scheduled-watch.md),
+  ADR-016), implemented and tested but not yet run live: one Temporal
+  Schedule from a private watchlist file runs a workflow that rechecks
+  cases waiting for a decision, then reads the watched Ashby and
+  Greenhouse boards through their public APIs. A recheck runs the verify
+  path again without a state transition; it skips the model when the page
+  text and its cited claims are unchanged. When the decision table finds
+  the posting closed or expired, or an Ashby posting is absent from its
+  board with no JobPosting on the page on two consecutive rechecks, the
+  case's approval is expired with that reason. New postings that pass a
+  location and title filter and fall within a lookback window become
+  cases, newest first, under a per-run budget, and go through the same
+  pipeline and human approval. Each run records one audit event.
+  Relevance stays with the evaluator; nothing is reopened;
 - an evidence loop: "add context and re-evaluate" records the reviewer's
   note as their decision and continues the same workflow into the next
   round, which re-verifies the posting and re-evaluates with the note as
@@ -255,8 +270,8 @@ Ashby adapter):
 
 Not implemented yet (Slice 2+):
 
-- watchlist, ATS discovery and further ATS adapters, scheduled scans and
-  rechecks, capability registry policy enforcement, prompt/policy version
-  registry;
+- further ATS adapters (Lever, SmartRecruiters), importing external scan
+  reports, rechecks of approved cases, capability registry policy
+  enforcement, prompt/policy version registry;
 - authorization, failure inbox UI, OTel traces and cost dashboard;
 - golden evals, calibration, policy promotion.

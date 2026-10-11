@@ -7,10 +7,10 @@ gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-10-10 |
-| Branch | `main`, no remote; Ashby adapter: `d537802`. Documentation committed separately. |
+| As of | 2026-10-11 |
+| Branch | `scheduled-watch` (from `main` at `b15472c`), no remote; ticket 004 code: `a15cc23`, with documentation in the following commit. Ashby adapter: `d537802`. |
 | Slice | Slice 1 implementation and core live paths verified; release/tag decision remains with the owner. |
-| Current focus | Ticket 003 (Ashby adapter) implemented, reviewed and verified; live API and reader-fallback checks recorded. The final ATS-host classification line awaits worker rebuild. |
+| Current focus | Ticket 004 (scheduled watch, ADR-016 accepted) committed and verified locally; two review findings remain, and the Schedule and live acceptance have not yet been run. |
 
 ## Current state
 
@@ -39,6 +39,17 @@ gitignored `HANDOFF.md`.
   change; replay does not exercise the adapter. The API host is also in
   the shared ATS host list, so generic observations classify consistently
   and company-host mappings cannot register it as a company host.
+- **Scheduled watch ([ticket 004](tickets/004-scheduled-watch.md),
+  ADR-016):** a private watchlist
+  (`COUNTERSIGN_WATCHLIST_PATH`) drives one Temporal Schedule. Each run
+  rechecks PENDING_APPROVAL cases under a model-call budget, then lists
+  the watched Ashby/Greenhouse boards and admits filtered postings from
+  a lookback window as posting-derived cases under a second budget.
+  Rechecks record without a state transition and skip the model on an
+  unchanged page; a closure (decision table, or Ashby board absence on
+  two consecutive rechecks) expires the approval via a `source_closed`
+  Signal that shares the decision's slot. No schema change. Not yet run
+  on a real Temporal server or live.
 - **Fetch/render:** per-fetch redirect cookies use logical hostnames; the
   shared client's jar is inert. Rendering permits page-named resources
   under the existing DNS-pinned, read-only policy.
@@ -54,6 +65,15 @@ gitignored `HANDOFF.md`.
   UNKNOWN. Stored signals are not recomputed. No migration is added.
 
 ## Verification and deployment
+
+Ticket 004 code commit `a15cc23` was checked on 2026-10-11 in a fresh
+detached worktree and Python 3.14.3 venv: ruff check and format (129
+files), pyright 0 errors, lint-imports 3 contracts kept, `pytest -ra`
+**348 passed, no skips** on disposable PostgreSQL database
+`countersign_watch_code_a15cc23` at `127.0.0.1:5435` (dropped), and web
+typecheck/build with dependencies installed from `pnpm-lock.yaml`.
+Source responses and model providers were fakes; no Schedule was created
+on any server. Details are in the ticket.
 
 Code commit `d537802` was checked on 2026-10-10 in a fresh detached
 worktree and Python 3.14.3 venv, with front-end dependencies installed
@@ -112,16 +132,19 @@ rules; the successful board run does not prove those specific paths.
 
 ## Next
 
-1. Owner decides the Slice 1 release boundary and any further live
+1. Follow up the two watch review findings below. The owner writes the
+   private watchlist, rebuilds the worker and confirms the
+   Schedule exists, then runs the two-week live acceptance in the
+   ticket. Watch whether Ashby moves `publishedAt` on republication.
+2. Owner decides the Slice 1 release boundary and any further live
    coverage above. Before publication: full gitleaks/private-identifier
    sweep, release tag and v4 §25 claim review. The owner adds the remote
    and pushes; no tag or publication is implied by this commit series.
-2. Rebuild the worker for ticket 003's final ATS-host classification
-   line. The adapter's API and oversized-board fallback paths have
-   recorded live checks; approval rules are unchanged.
-3. Then scans/rechecks, registries, calibration (including score noise),
-   traces and cost, within the v4 §24 timebox. Research remains Slice 2.5
-   under ADR-011.
+3. The worker rebuild for ticket 004 also deploys ticket 003's final
+   ATS-host classification line.
+4. Then the scan-report import, registries, calibration (including
+   score noise), traces and cost, within the v4 §24 timebox. Research
+   remains Slice 2.5 under ADR-011.
 
 ## Known limits and deferred decisions
 
@@ -131,6 +154,20 @@ rules; the successful board run does not prove those specific paths.
   Accepted/deferred by the owner on 2026-09-28; use verified ASCII/punycode
   entries for now. A mapped main host covers all its paths; apply-entry
   checks do not eliminate reader misinterpretation.
+- Watch: Greenhouse has no verify-path adapter, so a Greenhouse posting
+  taken down closes through the decision table or approval expiry, not
+  board absence; hosted URLs of boards with their own careers site
+  redirect to the company page, official only when mapped. A candidate
+  left over by the budget can age out of the window. Rechecks of Ashby
+  cases each read the whole board. The Schedule code has no automated
+  test (the test server has no Schedules).
+- Two watch review findings remain in the committed implementation:
+  the pending-request check and recheck write lack concurrent-decision
+  protection, so an old round's recheck can become the next round's
+  pinned verification; Ashby secondary-location address locality/country
+  fields are not extracted, so a matching secondary location can be
+  filtered out. The owner requested committing with only the retry-budget
+  finding fixed; these two remain follow-ups, not verified guarantees.
 - Ashby adapter: the published path does not pre-render, so a posting
   page with no text and no JSON-LD stops at NEEDS_MORE_EVIDENCE although
   the API verified it OPEN (the API description as body is a follow-up).
