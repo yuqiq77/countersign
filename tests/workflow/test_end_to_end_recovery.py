@@ -414,7 +414,7 @@ async def test_request_evidence_re_evaluates_with_the_reviewers_note() -> None:
     per round, and the case page's in-flight flag ends with the approval."""
 
     queue = f"e2e-{uuid.uuid4()}"
-    note = "Completed a structured interview-preparation course this year."
+    note = "Completed a cloud certification course this year."
     async with await time_skipping_env() as env:
         async with Worker(
             env.client,

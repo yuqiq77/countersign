@@ -237,7 +237,7 @@ def test_cookies_do_not_carry_across_fetches_on_the_shared_client(
 def test_concurrent_fetches_to_one_address_never_share_a_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Owner's reproduction, made deterministic: two sites on one pinned
+    """A reproduction, made deterministic: two sites on one pinned
     address, fetched from two threads through the shared client. Case A's
     302 sets a session cookie; case B's request is forced into the moment
     right after A's response was received and before A's own jar stored

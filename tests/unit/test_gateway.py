@@ -267,7 +267,7 @@ def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() 
         OperatorContext(
             decision_id="dec-appr-case-1-g1-v1",
             supplied_at=datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
-            text="Completed a structured interview-preparation course this year.",
+            text="Completed a cloud certification course this year.",
         )
     ]
     user = build_user_prompt(
@@ -282,7 +282,7 @@ def test_operator_context_rides_in_the_user_prompt_and_is_cited_by_the_record() 
         "--- OPERATOR-SUPPLIED CONTEXT (human-asserted, not observed on the posting) ---"
     )
     assert posting_end < block
-    assert "[2026-09-25] Completed a structured interview-preparation course" in user
+    assert "[2026-09-25] Completed a cloud certification course" in user
     assert user.endswith("--- END OPERATOR-SUPPLIED CONTEXT ---")
     assert "OPERATOR-SUPPLIED CONTEXT" not in build_system_prompt()
     assert "Treat case context as human assertions" in build_system_prompt()
