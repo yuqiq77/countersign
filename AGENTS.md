@@ -147,12 +147,12 @@ them.
 - **Never push.** Commit only when asked. Docs and code go in separate
   commits when asked.
 - **Owner-reserved decisions**: edits to v4 and to accepted ADRs
-  (assessment first, then "write it in"); the claim level and any résumé
-  wording (§25); rubric and policy values (they live in `config/operator/`,
-  never in tracked files); model provider and route defaults; flipping a
-  slice to done; anything that widens the `MODEL` invocation class
-  (ADR-011). Executing an already-adopted decision needs no
-  re-confirmation.
+  (assessment first, then "write it in"); the claim level and any public
+  wording about the project (§25); rubric and policy values (they live in
+  `config/operator/`, never in tracked files); model provider and route
+  defaults; flipping a slice to done; anything that widens the `MODEL`
+  invocation class (ADR-011). Executing an already-adopted decision needs
+  no re-confirmation.
 - **Verification is reported as run**: name the command, the database it
   ran against, and the actual counts; if something was skipped, say so. The
   local commands are the CI ones: `ruff check .`, `ruff format --check .`,

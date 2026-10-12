@@ -87,8 +87,7 @@ Implementation follows Slice 2 (registry policy enforcement and gateway
 route registry are prerequisites) as a timeboxed slice of its own. Kill
 rule: the `CompanyProfile` schema ships regardless; the loop is its
 automated filler, and an operator-filled profile is the degraded mode. The
-§25 résumé wording upgrade ("tool use by an LLM") applies only after this
-ships.
+§25 claim upgrade ("tool use by an LLM") applies only after this ships.
 
 ## Consequences
 

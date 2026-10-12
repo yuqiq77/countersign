@@ -39,7 +39,7 @@ validate request
 → persist execution metadata and audit result
 ```
 
-In v1, registered external capabilities are invoked by Workflow code. Human commands such as recording an outcome or authoring a policy proposal use authenticated API command handlers. No capability is model-invoked at launch, and the résumé does not claim LLM tool use.
+In v1, registered external capabilities are invoked by Workflow code. Human commands such as recording an outcome or authoring a policy proposal use authenticated API command handlers. No capability is model-invoked at launch, and the project does not claim LLM tool use.
 
 The registry may support `MODEL` as a definition value, but a model cannot directly execute a capability. If a future dynamic evidence-gathering requirement is approved, the model may emit a typed intent that traverses the same executor and allowlists.
 

@@ -21,7 +21,7 @@
 Countersign is a governed control plane that turns unreliable external job listings into reviewable **Job Intelligence Cases**. Its scope follows two constraints:
 
 1. **The first deployment has one operator.** The system must become useful early, before every enterprise-shaped extension exists.
-2. **Enterprise form without a real constraint behind it is a negative signal.** Experienced interviewers read unnecessary complexity as poor scoping judgment. Every component must survive the question *"why did you need this?"* with a domain answer, not a portfolio answer.
+2. **Enterprise form needs a real constraint behind it.** Unnecessary complexity is a scoping failure. Every component must survive the question *"why did you need this?"* with a domain answer.
 
 The multi-user identity stack, multi-tenancy, policy canary/shadow deployment, escalation chains, and autonomous learning are outside the current scope. Discovery uses inputs that exist across constrained job markets: paste-a-URL, curated watchlists, and official ATS APIs. Policy evolution is **human-proposed and machine-validated**; observability uses one backend; delivery slices have timeboxes and kill criteria; and sustained operator use is treated as operational evidence rather than hidden behind enterprise-shaped infrastructure.
 
@@ -49,8 +49,6 @@ The single scoping rule for every component:
 | **Principle real, spec was theater** | Build the principle, not the org chart | Server-side authorization (2 real roles, not 5); audit log; policy/prompt/model versioning |
 | **Theater at n=1** | Cut; revisit only when a real constraint appears | OIDC multi-user identity; multi-tenancy; policy canary/shadow deploys; approval escalation chains; 12-runbook program; LLM-generated policy proposals from sparse outcomes |
 
-Interview framing: components in tier 1 are assets (the honest answer to "why?" is "the domain needed it"). Components in tier 3 are liabilities (the honest answer would be "to look enterprise"). This document deliberately contains no tier-3 components.
-
 ---
 
 ## 3. Dual-Track Goals
@@ -62,15 +60,13 @@ The system serves two tracks simultaneously and fails if either is abandoned:
 - Scheduled scans of an operator-managed watchlist from **Slice 2**.
 - Operator-approved cases and outcomes flow through the system from Slice 2 onward.
 
-**Track B — portfolio evidence of agentic reliability engineering.**
+**Track B — evidence of agentic reliability engineering.**
 - Demonstrated, not claimed: kill a worker mid-Activity and watch recovery; feed malformed model output and watch bounded repair; show the trace, the cost, the audit trail, the regression gate catching a bad prompt.
 - Accumulated: sustained operational history — cases, cost data, incidents, and eval drift. This is the substance that enterprise *form* cannot substitute for, and it is only obtainable through real use.
 
 ---
 
 ## 4. What This System Does and Does Not Demonstrate
-
-Stated up front, in the repository README and in interviews, because preemptive honesty is itself the signal.
 
 **Demonstrates:**
 
@@ -83,7 +79,7 @@ Stated up front, in the repository README and in interviews, because preemptive 
 - governed, reversible policy evolution with a human in the loop;
 - operational history from sustained use, exported only in privacy-safe aggregate form.
 
-**Does not demonstrate (and never claims):**
+**Does not demonstrate:**
 
 - scale: traffic, concurrency tuning, horizontal scaling under load;
 - multi-user adversarial security or compliance regimes;
@@ -383,7 +379,7 @@ The Capability Registry governs **every external capability call** — scheduled
 
 Capability definitions carry: name+semver, **`invoked_by: WORKFLOW | MODEL | HUMAN`**, schemas, allowed workflows, required scope, risk level, allowed domains, timeout/retry/rate-limit, idempotency strategy, source authority, audit policy.
 
-`invoked_by` answers the question an interviewer will ask: *when does the LLM actually choose a tool?* **In v1: never.** Fetching, verification, and normalization are invoked deterministically by workflow code; outcome recording and policy proposals are human/API commands. `MODEL` is a supported but empty class at launch — the `ToolIntent` path is built and tested, but no capability is registered to it until dynamic evidence-gathering shows a measured need. Résumé wording follows the facts (§25).
+`invoked_by` answers the question that matters most for an agentic system: *when does the LLM actually choose a tool?* **In v1: never.** Fetching, verification, and normalization are invoked deterministically by workflow code; outcome recording and policy proposals are human/API commands. `MODEL` is a supported but empty class at launch — the `ToolIntent` path is built and tested, but no capability is registered to it until dynamic evidence-gathering shows a measured need. Public claims follow the facts (§25).
 
 Initial capabilities:
 
@@ -447,13 +443,13 @@ A `BenchmarkRole` is a curated exemplar JD with an agreed evaluation and an arch
 
 ### 17.2 Slate diversity policy
 
-The score's semantics stay pure — "how good is this role for the candidate" — because outcome calibration depends on it. Portfolio construction happens after scoring, in a deterministic `slate_policy`: per-role-family caps or diminishing-returns weighting on the weekly recommendation slate, with demotions labeled transparently in the UI ("shown lower for slate diversity"), never silently baked into the score. Asset scores are not portfolio weights.
+The score's semantics stay pure — "how good is this role for the candidate" — because outcome calibration depends on it. Slate construction happens after scoring, in a deterministic `slate_policy`: per-role-family caps or diminishing-returns weighting on the weekly recommendation slate, with demotions labeled transparently in the UI ("shown lower for slate diversity"), never silently baked into the score. Asset scores are not slate weights.
 
-Diagnosis precedes penalty: funnel telemetry distinguishes whether concentration (e.g., an all-FDE week) originates in discovery (watchlist/keyword bias), in evaluation (rubric bias), or in the market itself — three different prescriptions. Diversified applications also produce per-family calibration data, feeding §17.4.
+Diagnosis precedes penalty: funnel telemetry distinguishes whether concentration (e.g., a week of one role family) originates in discovery (watchlist/keyword bias), in evaluation (rubric bias), or in the market itself — three different prescriptions. Diversified applications also produce per-family calibration data, feeding §17.4.
 
 ### 17.3 Role families and bidirectional fit
 
-- **Role-family classification uses responsibilities, not titles.** "FDE" spans genuine field engineering to relabeled implementation consulting; substance decides the family, and the golden set includes a case that punishes title-based classification.
+- **Role-family classification uses responsibilities, not titles.** Substance decides the family, and the golden set includes a case that punishes title-based classification.
 - **Transition feasibility weighs both gates and scarcity** via `distinctive_assets` (§14): a verified differentiator may matter substantially in one role family and be irrelevant in another that has unrelated hard gates.
 - **Decision thresholds are versioned policy.** Operators may change them through the normal proposal, replay, approval, and activation path; the evaluator never improvises a threshold for an individual case.
 
@@ -537,7 +533,7 @@ Cost is an explicit, configurable operating constraint. The following values are
 | LLM usage | Capped per-route budgets, prompt caching, small-model tiering | Operator-defined cap |
 | **Total target** | Enforced in versioned policy | **Deployment-specific** |
 
-Temporal Cloud is not required for the demo. Self-hosting is a **cost and reproducibility choice, not a résumé claim**. A single VPS demonstrates worker and process crash recovery, not high availability; host failure is handled by backups plus a documented redeploy with defined RPO/RTO. Temporal UI, PostgreSQL, and the blob store are never exposed to the public internet. Budget breaches alert the operator through the existing budget-failure class rather than silently degrading.
+Temporal Cloud is not required for the demo. Self-hosting is a **cost and reproducibility choice**. A single VPS demonstrates worker and process crash recovery, not high availability; host failure is handled by backups plus a documented redeploy with defined RPO/RTO. Temporal UI, PostgreSQL, and the blob store are never exposed to the public internet. Budget breaches alert the operator through the existing budget-failure class rather than silently degrading.
 
 ---
 
@@ -590,7 +586,7 @@ No broad scraping, messaging integrations, CV generation, or memory layer is bui
 
 ## 25. Gate Matrix and Claim Levels
 
-16 gates. Two honest résumé claims instead of one all-or-nothing threshold.
+16 gates, grouped into two levels of public claims instead of one all-or-nothing threshold.
 
 | # | Gate | M | Level | Evidence |
 |---:|---|:---:|:---:|---|
@@ -612,7 +608,7 @@ No broad scraping, messaging integrations, CV generation, or memory layer is bui
 | 16 | Deployed demo |  | 2 | Seeded hosted environment |
 
 **Claim Level 1** (gates 1–12, end of Slice 2):
-> Built a durable, human-governed agentic workflow system with governed execution of typed external capabilities, official-source verification, evidence provenance, and full trace/cost observability (Temporal, FastAPI, PostgreSQL, Next.js).
+> A durable, human-governed agentic workflow system with governed execution of typed external capabilities, official-source verification, evidence provenance, and full trace/cost observability (Temporal, FastAPI, PostgreSQL, Next.js).
 
 **Claim Level 2** (all M gates + 15, end of Slice 4):
 > …extended with a versioned evaluation policy system: regression gates in CI, historical replay, and human-approved, reversible policy evolution informed by reviewer corrections and observed application outcomes.
@@ -621,7 +617,7 @@ No claim is used before its gates have code, tests, and telemetry behind it. Not
 
 ---
 
-## 26. Portfolio Demo Script (8–10 minutes, seeded data)
+## 26. Demo Script (8–10 minutes, seeded data)
 
 1. Discover the same job via an aggregator fixture and the official Greenhouse fixture; show one canonical case with two immutable snapshots (two-phase dedup visible).
 2. Kill the worker mid-verification; show Temporal resume with no duplicate side effect.
@@ -707,9 +703,3 @@ Deferred capabilities are not implied by placeholder schemas or inert infrastruc
 ## 30. Final Architecture Test
 
 For any recommendation, the product — not only the logs — must show where each fact came from, whether the role is verifiably open, which rules and versions produced the recommendation, what happened on failure, whether recovery duplicated effects, who approved and why, what it cost, and whether a new version regressed.
-
-One question applies to every component before it is built:
-
-> **If an interviewer asks "why did you need this?", is the honest answer about the domain — or about the résumé?**
-
-Only the first answer justifies the component. A production-oriented claim is supported by a system whose parts solve real domain constraints and whose public evidence is safe, reproducible, and honest.

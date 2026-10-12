@@ -15,19 +15,19 @@ The implementation baseline is [Architecture v4](docs/job-search-agent-architect
 ## Why this exists
 
 It started with a small, specific failure. A general-purpose agent running
-a scheduled job search kept returning stale postings and links that had
-already gone 404. The answers carried links but no evidence: nothing showed
-when a posting had last been seen open, or whether anything had checked. A
-better prompt would have made the answers more convincing, not more
-checkable.
+a scheduled job search kept recommending postings that were gone by the
+time you clicked through. The answers carried links but no evidence:
+nothing showed when a posting had last been seen open, or whether anything
+had checked. A better prompt would have made the answers more convincing,
+not more checkable.
 
 Making them checkable is a systems problem rather than a prompting one:
 
-- **Status comes from rules in code, applied to what the page shows.** A
-  404 or 410 is CLOSED, a past `validThrough` is EXPIRED, and OPEN needs a
-  cited apply entry on an official source; anywhere else the same entry
-  reaches only OPEN_THIRD_PARTY_ONLY. HTTP 200 alone proves nothing
-  ([decision table](src/countersign/domain/verification.py)).
+- **A link is not evidence that a job is open.** OPEN needs an apply entry
+  cited from an official source; anywhere else the same entry reaches only
+  OPEN_THIRD_PARTY_ONLY. A cited closed notice, a past expiry date or a
+  removed page closes the posting. These rules live in code, not in the
+  prompt ([decision table](src/countersign/domain/verification.py)).
 - **External calls fail.** Fetches and model calls retry as durable
   workflow steps, and a worker killed mid-step resumes without writing a
   second snapshot, evaluation or audit event.
