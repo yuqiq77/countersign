@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import time_skipping_env, wait_for_pending_approval
+from support import client_rendered_posting, time_skipping_env, wait_for_pending_approval
 from temporalio import activity, workflow
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
@@ -284,24 +284,6 @@ POSTING_URL = f"https://jobs.ashbyhq.com/acme/{JOB_ID}"
 BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/acme"
 
 
-def _page() -> bytes:
-    """A client-rendered posting: no visible text, the posting in JSON-LD."""
-
-    posting = {
-        "@context": "https://schema.org",
-        "@type": "JobPosting",
-        "title": "Platform Engineer",
-        "description": "<p>Build durable systems on Temporal.</p>",
-        "hiringOrganization": {"@type": "Organization", "name": "Acme"},
-        "validThrough": "2099-12-31T00:00:00Z",
-    }
-    return (
-        b'<html><head><title>Platform Engineer @ Acme</title><script type="application/ld+json">'
-        + json.dumps(posting).encode()
-        + b'</script></head><body><div id="root"></div></body></html>'
-    )
-
-
 def _board() -> bytes:
     job = {
         "id": JOB_ID,
@@ -324,7 +306,7 @@ def _fetch(url: str, **_: object) -> FetchResult:
         final_url=url,
         http_status=200,
         content_type="application/json" if board else "text/html",
-        body=_board() if board else _page(),
+        body=_board() if board else client_rendered_posting(),
         redirect_chain=[],
     )
 

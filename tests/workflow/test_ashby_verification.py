@@ -16,7 +16,12 @@ from typing import Any
 import httpx
 import pytest
 from sqlalchemy import func, select
-from support import start_case, time_skipping_env, wait_for_pending_approval
+from support import (
+    client_rendered_posting,
+    start_case,
+    time_skipping_env,
+    wait_for_pending_approval,
+)
 from temporalio.worker import Worker
 
 import countersign.activities.case_activities as case_activities
@@ -50,24 +55,6 @@ POSTING_URL = f"https://jobs.ashbyhq.com/acme/{JOB_ID}"
 APPLY_URL = f"{POSTING_URL}/application"
 BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/acme"
 FUTURE = "2099-12-31T00:00:00Z"
-
-
-def _page(valid_through: str = FUTURE) -> bytes:
-    """A client-rendered posting: no visible text, the posting in JSON-LD."""
-
-    posting = {
-        "@context": "https://schema.org",
-        "@type": "JobPosting",
-        "title": "Platform Engineer",
-        "description": "<p>Build durable systems on Temporal.</p>",
-        "hiringOrganization": {"@type": "Organization", "name": "Acme"},
-        "validThrough": valid_through,
-    }
-    return (
-        b'<html><head><title>Platform Engineer @ Acme</title><script type="application/ld+json">'
-        + json.dumps(posting).encode()
-        + b'</script></head><body><div id="root"></div></body></html>'
-    )
 
 
 def _board(*, published: bool = True, listed: bool = True) -> bytes:
@@ -147,7 +134,9 @@ def test_a_published_posting_is_verified_from_the_api_without_the_model(
 ) -> None:
     seen: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
-        case_activities, "fetch_url", _network(_page(), _board(listed=listed), seen=seen)
+        case_activities,
+        "fetch_url",
+        _network(client_rendered_posting(), _board(listed=listed), seen=seen),
     )
     monkeypatch.setattr(case_activities, "resolve_provider", _no_model)
     case_id = str(uuid.uuid4())
@@ -234,7 +223,7 @@ def test_the_page_still_wins_when_it_shows_the_posting_gone_or_expired(
     monkeypatch.setattr(
         case_activities,
         "fetch_url",
-        _network(_page(valid_through), _board(), page_status=page_status),
+        _network(client_rendered_posting(valid_through), _board(), page_status=page_status),
     )
     monkeypatch.setattr(case_activities, "resolve_provider", _no_model)
     case_id = str(uuid.uuid4())
@@ -265,7 +254,7 @@ def test_otherwise_the_reader_reads_the_page_and_the_attempt_is_recorded(
     unavailable API is no worse than today: the reader runs unchanged."""
 
     reader = FakeEvaluationProvider()  # unscripted: an empty reading
-    monkeypatch.setattr(case_activities, "fetch_url", _network(_page(), board))
+    monkeypatch.setattr(case_activities, "fetch_url", _network(client_rendered_posting(), board))
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: reader)
     monkeypatch.setattr(case_activities, "render_url", _render_unavailable)
     case_id = str(uuid.uuid4())
@@ -309,7 +298,7 @@ def test_the_lookup_follows_the_page_to_where_it_landed(
     classifies observation 0: a link redirecting onto an Ashby posting is
     looked up; an Ashby link redirecting off its posting is not."""
 
-    served = _network(_page(), _board())
+    served = _network(client_rendered_posting(), _board())
 
     def fetch(url: str, **kwargs: object) -> FetchResult:
         if url != pasted:
@@ -319,7 +308,7 @@ def test_the_lookup_follows_the_page_to_where_it_landed(
             final_url=landed,
             http_status=200,
             content_type="text/html",
-            body=_page(),
+            body=client_rendered_posting(),
             redirect_chain=[url],
         )
 
@@ -351,7 +340,9 @@ def test_a_provider_outage_in_the_reader_path_still_propagates(
         raise ProviderUnavailable("induced 529")
 
     monkeypatch.setattr(reader, "parse", outage)
-    monkeypatch.setattr(case_activities, "fetch_url", _network(_page(), _board(published=False)))
+    monkeypatch.setattr(
+        case_activities, "fetch_url", _network(client_rendered_posting(), _board(published=False))
+    )
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: reader)
     monkeypatch.setattr(case_activities, "render_url", _render_unavailable)
     case_id = str(uuid.uuid4())
@@ -377,7 +368,9 @@ def test_the_api_attempt_spends_the_reading_budget(monkeypatch: pytest.MonkeyPat
         return read_page(*args, **kwargs)
 
     monkeypatch.setattr(case_activities, "read_page", spy)
-    monkeypatch.setattr(case_activities, "fetch_url", _network(_page(), _board(published=False)))
+    monkeypatch.setattr(
+        case_activities, "fetch_url", _network(client_rendered_posting(), _board(published=False))
+    )
     monkeypatch.setattr(case_activities, "resolve_provider", FakeEvaluationProvider)
     monkeypatch.setattr(case_activities, "render_url", _render_unavailable)
     case_activities.verify_status(_intake(str(uuid.uuid4())))
@@ -389,7 +382,7 @@ async def test_a_published_posting_reaches_approval_with_only_the_evaluators_mod
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provider = FakeEvaluationProvider()
-    monkeypatch.setattr(case_activities, "fetch_url", _network(_page(), _board()))
+    monkeypatch.setattr(case_activities, "fetch_url", _network(client_rendered_posting(), _board()))
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: provider)
     monkeypatch.setenv("COUNTERSIGN_MODEL_PROVIDER", "fake")
 

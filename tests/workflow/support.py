@@ -1,6 +1,7 @@
 """Shared helpers for workflow tests."""
 
 import asyncio
+import json
 import uuid
 
 from temporalio.client import WorkflowHandle
@@ -17,6 +18,24 @@ from countersign.runtime import workflow_id_for
 from countersign.workflows.job_case import JobIntelligenceWorkflow
 
 JOB_URL = "https://boards.greenhouse.io/acme/jobs/1"
+
+
+def client_rendered_posting(valid_through: str = "2099-12-31T00:00:00Z") -> bytes:
+    """A client-rendered posting: no visible text, the posting in JSON-LD."""
+
+    posting = {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": "Platform Engineer",
+        "description": "<p>Build durable systems on Temporal.</p>",
+        "hiringOrganization": {"@type": "Organization", "name": "Acme"},
+        "validThrough": valid_through,
+    }
+    return (
+        b'<html><head><title>Platform Engineer @ Acme</title><script type="application/ld+json">'
+        + json.dumps(posting).encode()
+        + b'</script></head><body><div id="root"></div></body></html>'
+    )
 
 
 async def time_skipping_env() -> WorkflowEnvironment:
