@@ -11,8 +11,7 @@ from countersign.contracts.verification import VerificationResult
 _NEVER_APPROVABLE = (JobStatus.CLOSED, JobStatus.EXPIRED)
 
 # Evidence-loop rounds per case (ADR-014). At the cap the approval offers no
-# REQUEST_EVIDENCE: three rounds of context is a conversation; more is a
-# profile that should be edited.
+# REQUEST_EVIDENCE.
 MAX_GENERATIONS = 3
 
 
@@ -30,12 +29,9 @@ def allowed_decisions_for(
     """The lifecycle gate: which decisions an approval request accepts.
 
     APPROVE is offered on any pinned verification that is not CLOSED or
-    EXPIRED (ADR-013 as amended). The system's own framing stays gated
-    separately (`gated_decision`): it never presents a posting as apply-now
-    without a verified OPEN. Approving a posting the system did not verify
-    is the reviewer's own verification, derived and recorded by the
-    decision Activity; nothing is typed to prove it. REQUEST_EVIDENCE is
-    offered while evidence-loop rounds remain (ADR-014).
+    EXPIRED (ADR-013 as amended); the apply-now framing is gated separately
+    (`gated_decision`). REQUEST_EVIDENCE is offered while evidence-loop
+    rounds remain (ADR-014).
 
     The set is computed once, against the verification pinned to the
     request, and stored on it; the API checks decisions against that set.

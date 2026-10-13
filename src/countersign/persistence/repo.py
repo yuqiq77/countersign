@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from countersign.contracts.base import ContractModel
 from countersign.contracts.cases import ApprovalRequestView, CaseSummary, OperatorContext
 from countersign.contracts.enums import (
     ActorType,
@@ -58,6 +59,16 @@ def ensure_utc(value: datetime) -> datetime:
     """
 
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _from_payload[R: ContractModel](model: type[R], payload: dict[str, object]) -> R:
+    """Validate a record this module stored as a JSON payload.
+
+    The payload was dumped in JSON mode, so enums and datetimes come back as
+    strings; this self-produced boundary is the one place validation is lax.
+    """
+
+    return model.model_validate(payload, strict=False)
 
 
 class DecisionConflictError(ValueError):
@@ -342,8 +353,7 @@ def record_page_reading(session: Session, record: PageReadingRecord) -> str:
 
 def get_page_reading(session: Session, reading_id: str) -> PageReadingRecord | None:
     row = session.get(PageReadingRow, reading_id)
-    # Self-produced JSON boundary: enums and datetimes come back as strings.
-    return None if row is None else PageReadingRecord.model_validate(row.payload, strict=False)
+    return None if row is None else _from_payload(PageReadingRecord, row.payload)
 
 
 def latest_page_reading(session: Session, case_id: str) -> PageReadingRecord | None:
@@ -355,8 +365,7 @@ def latest_page_reading(session: Session, case_id: str) -> PageReadingRecord | N
     row = session.scalars(stmt).first()
     if row is None:
         return None
-    # Self-produced JSON boundary: enums and datetimes come back as strings.
-    return PageReadingRecord.model_validate(row.payload, strict=False)
+    return _from_payload(PageReadingRecord, row.payload)
 
 
 # --- verification ----------------------------------------------------------
@@ -463,9 +472,7 @@ def _latest_evaluation_row(session: Session, case_id: str) -> EvaluationRunRow |
 
 
 def _evaluation_record(row: EvaluationRunRow, generation: int) -> EvaluationRecord:
-    # Self-produced JSON payload: validated laxly at this one boundary
-    # because it was dumped in JSON mode (enums/datetimes as strings).
-    record = EvaluationRecord.model_validate(row.payload, strict=False)
+    record = _from_payload(EvaluationRecord, row.payload)
     if "generation" not in row.payload:
         # Written before records carried their round: recover it from the
         # approval that pinned this evaluation, else from its position

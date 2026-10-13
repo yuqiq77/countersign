@@ -36,8 +36,7 @@ class JsonLdSummary(ContractModel):
 
     Serialized under the source's own names (`directApply`, `validThrough`,
     `datePosted`), so the dossier shows the pair the rules ask the model to
-    cite. A live model quoted `direct_apply: true` from a dossier that used
-    the field names and was rejected for it.
+    cite.
     """
 
     model_config = ConfigDict(serialize_by_alias=True)
