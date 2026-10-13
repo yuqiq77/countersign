@@ -76,18 +76,9 @@ Source responses and model providers were fakes; no Schedule was created
 on any server. Details are in the ticket.
 
 Code commit `d537802` was checked on 2026-10-10 in a fresh detached
-worktree and Python 3.14.3 venv, with front-end dependencies installed
-from `pnpm-lock.yaml`:
-
-- `.venv/bin/ruff check .` and `.venv/bin/ruff format --check .`: passed,
-  118 files reported by the formatter; `.venv/bin/pyright`: 0 errors;
-  `.venv/bin/lint-imports`: 3 contracts kept.
-- `.venv/bin/pytest -ra`: **295 passed, no skips**, using disposable
-  PostgreSQL database `countersign_ashby_code_d537802` at
-  `127.0.0.1:5435` (dropped afterwards), SQLite fixtures, Temporal's test
-  server and local Chrome. Private profile/mapping/salary inputs were
-  unset; model providers and external source responses were fakes.
-- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+worktree and Python 3.14.3 venv: `pytest -ra` **295 passed, no skips** on
+disposable PostgreSQL database `countersign_ashby_code_d537802` (dropped),
+with the other local checks passing. Details are in ticket 003.
 
 Ticket 003 records the owner's 2026-10-10 live check: three postings used
 the API path without a reader model call; a fourth exceeded the API body

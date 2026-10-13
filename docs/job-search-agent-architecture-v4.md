@@ -169,7 +169,7 @@ An LLM output can never overwrite a source fact or a human decision. A human cor
 
 `JobCase`, `SourceSnapshot`, `CanonicalJob`, `VerificationResult`, `EvidenceClaim`, `EvaluationRun`, `ApprovalRequest`, `HumanDecision`, `WorkflowRun`, `ToolExecution`, `ModelInvocation`, `PromptVersion`, `PolicyVersion`, `BenchmarkRole`, `OutcomeEvent`, `PolicyChangeProposal`, `CalibrationReport`, `EvalRun`, `AuditEvent`, `IdempotencyRecord`.
 
-`PromotionDecision` folds into `HumanDecision`; `ApplicationArtifact` is deferred with the artifact pipeline. `BenchmarkRole` is a curated exemplar JD with an agreed evaluation and an archetype label, versioned as a policy artifact and used as a scoring anchor, golden-set member, and gap-analysis target (§17.1).
+`PromotionDecision` folds into `HumanDecision`; `ApplicationArtifact` is deferred with the artifact pipeline. `BenchmarkRole`, a curated exemplar JD versioned as a policy artifact, is defined in §17.1.
 
 ### 8.3 Identity and two-phase deduplication
 

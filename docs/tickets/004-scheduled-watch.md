@@ -143,14 +143,11 @@ unpublish-and-republish cycles.
      page closed while the API still lists it) from being recorded. The
      case is not admitted again; the operator re-pastes it for a fresh
      case, whose own lifecycle covers later takedowns.
-4. **Closure is the existing decision table plus one deterministic
-   signal (ADR-016).** A recheck closes a pending case when the verify
-   path returns CLOSED or EXPIRED — HTTP 404/410, a cited closed notice,
-   a past `validThrough` — or when an API-backed posting is absent from a
-   healthy board (HTTP 200 with postings) and its page shows no
-   JobPosting, on two consecutive runs; the first such run records
-   UNVERIFIED with that reason. The owner's taken-down example shows why
-   the page alone cannot decide it: a shell with no notice.
+4. **Closure as decided in ADR-016 (decision 4):** the decision table's
+   CLOSED or EXPIRED, or board absence on two consecutive rechecks. The
+   first such recheck records UNVERIFIED with that reason; a taken-down
+   API-backed posting can leave a shell with no notice, so the page alone
+   cannot decide it.
    - *Absence*, observed by one recheck: the Ashby lookup in the verify
      path read a healthy board (HTTP 200 from the API host, parsed, at
      least one posting; an empty board is now noted "unavailable") that

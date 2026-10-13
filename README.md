@@ -191,82 +191,45 @@ resume with no duplicate snapshot, evaluation, or audit event.
 
 ## Current scope
 
-Implemented (Slice 1 core plus Slice 2 official-host mapping, the
-Ashby adapter and the scheduled watch):
+Implemented (Slice 1 core plus parts of Slice 2):
 
-- paste-a-URL intake with mandatory `Idempotency-Key`, 202 + durable workflow;
-- `JobIntelligenceWorkflow`: snapshot → normalize → verify → evaluate →
-  durable approval Signal wait, with quarantine/closed/expiry paths and a
-  needs-evidence stop before fit evaluation when the reader found no
-  posting text;
-- SSRF-guarded fetch (each hop pinned to its vetted address, with session
-  cookies kept per fetch under the hop's real hostname and never in the
-  shared client), deterministic HTML normalization (visible text, or
-  the JSON-LD `JobPosting` description when a client-rendered page has
-  none), and a bounded page reader in front of verification (ADR-012): the
-  model reads a dossier of page facts and may render the page or follow a
-  listed link, with one citation repair inside the same code-enforced
-  step budget and structured rejection records; cited controls must match
-  their labels and targets, and status uses one observation's own HTTP
-  response, authority and evidence. Without a completed reading there is
-  no inferred apply entry; HTTP 200 alone never proves OPEN. Chromium
-  rendering records actual navigation metadata;
-- separate system-recommendation and human-approval gates: the system's
-  APPLY_NOW framing needs verified official OPEN; a pending approval
-  permits APPROVE when its pinned verification is not CLOSED/EXPIRED.
-  Approval without official OPEN is recorded as the reviewer's own
-  verification with its own audit event (ADR-013, amended);
-- explicit official company hosts: a private JSON mapping of exact
-  hostnames the operator declares official, loaded by path like the
-  profile and validated at worker start; a matched host is
-  OFFICIAL_COMPANY and can reach OPEN with a cited apply entry. No
-  wildcards, path rules or inference, boards stay boards, and each reading
-  records the mapping version and fingerprint with every observation's
-  authority; a retried verification returns the stored result. IDNA
-  normalization can differ from the HTTP client; use verified ASCII or
-  punycode entries (see [known limits](docs/STATUS.md#known-limits-and-deferred-decisions));
-- an Ashby adapter in verification ([ticket 003](docs/tickets/003-ashby-adapter.md)):
-  a posting page on Ashby is looked up once in its board's public
-  posting API. A posting the API publishes with an apply link is verified
-  from that OFFICIAL_ATS response without a model call, while the page's
-  own 404/410 or past `validThrough` still decides; an absent posting,
-  an unavailable, oversized or malformed response leaves the reading to
-  the page reader, and the reading records the outcome. Absence alone
-  never closes a posting at verification;
-- a scheduled watch ([ticket 004](docs/tickets/004-scheduled-watch.md),
-  ADR-016), implemented and tested but not yet run live: one Temporal
-  Schedule from a private watchlist file runs a workflow that rechecks
-  cases waiting for a decision, then reads the watched Ashby and
-  Greenhouse boards through their public APIs. A recheck runs the verify
-  path again without a state transition; it skips the model when the page
-  text and its cited claims are unchanged. When the decision table finds
-  the posting closed or expired, or an Ashby posting is absent from its
-  board with no JobPosting on the page on two consecutive rechecks, the
-  case's approval is expired with that reason. New postings that pass a
-  location and title filter and fall within a lookback window become
-  cases, newest first, under a per-run budget, and go through the same
-  pipeline and human approval. Each run records one audit event.
-  Relevance stays with the evaluator; nothing is reopened;
-- an evidence loop: "add context and re-evaluate" records the reviewer's
-  note as their decision and continues the same workflow into the next
-  round, which re-verifies the posting and re-evaluates with the note as
-  labelled operator context, up to three rounds. Each later round also
-  receives the preceding approval's pinned assessment as a revisable
-  judgment; earlier evaluations remain available in case detail (ADR-014);
-- thin model gateway: structured output against the Pydantic contract,
-  bounded schema-repair retry, token/latency/version capture; deterministic
-  fake provider for tests and model-free runs;
-- deterministic compensation signal computed from extracted salary data
-  against annual acceptable and attractive thresholds: `CONCERNING`,
-  `ACCEPTABLE`, or `ATTRACTIVE`; a monthly figure is annualised by twelve;
-  missing data, a currency mismatch, or an hourly or unstated pay period
-  yields `UNKNOWN`;
-- idempotent persistence (deterministic IDs, dedup constraints, converged
-  retries) with append-only audit events in the same transaction;
-- Alembic migrations, Compose core profile, CI (ruff, pyright,
-  import-linter, pytest, web typecheck/build);
-- workflow tests under Temporal's time-skipping environment, including an
-  end-to-end run with real Activities and a duplicate-delivery test.
+- **Durable case workflow.** A pasted URL (with a mandatory `Idempotency-Key`)
+  becomes one Temporal workflow: snapshot → normalize → verify → evaluate →
+  human approval, with quarantine, needs-evidence, closure and seven-day
+  expiry paths. A killed worker resumes without duplicate records.
+- **Verification.** SSRF-guarded, DNS-pinned fetching and a bounded page
+  reader: the model may render a page or follow a listed link under
+  code-enforced budgets, and its claims count only after citation checks. A
+  decision table sets status; HTTP 200 alone never proves OPEN
+  ([ADR-012](docs/adr/012-bounded-page-reader.md), [ADR-015](docs/adr/015-render-network-policy.md)).
+- **Source authority.** Known ATS hosts and company hosts the operator lists
+  explicitly are official; boards and every other host are not
+  ([ADR-005](docs/adr/005-official-source-authority.md), [ticket 002](docs/tickets/002-official-domain-mapping.md)).
+- **Ashby API verification.** A posting the board's public API publishes is
+  verified without a model call; the page's own closure evidence still wins
+  ([ticket 003](docs/tickets/003-ashby-adapter.md)).
+- **Scheduled watch.** Implemented and tested, not yet run live: it rechecks
+  cases awaiting a decision and admits new postings from watched Ashby and
+  Greenhouse boards into the same pipeline
+  ([ADR-016](docs/adr/016-scheduled-watch.md), [ticket 004](docs/tickets/004-scheduled-watch.md)).
+- **Human approval.** The system's APPLY_NOW framing needs an official OPEN;
+  approving a posting without one is recorded as the reviewer's own
+  verification ([ADR-013](docs/adr/013-human-attestation-for-unverified-postings.md)).
+- **Evidence loop.** Reviewer context starts another round of verification
+  and evaluation, up to three ([ADR-014](docs/adr/014-evidence-loop-through-request-evidence.md)).
+- **Model gateway.** Structured output against Pydantic contracts, bounded
+  schema repair, token/latency/version capture, and a deterministic fake
+  provider for model-free runs.
+- **Compensation signal.** Computed in code from extracted salary against
+  configured bands; UNKNOWN whenever the figures cannot be compared.
+- **Persistence and audit.** Deterministic IDs, dedup constraints and
+  append-only audit events written in the same transaction.
+- **Tooling.** Alembic migrations, Compose core profile, CI (ruff, pyright,
+  import-linter, pytest with PostgreSQL, web typecheck/build), and workflow
+  tests under Temporal's time-skipping environment, including duplicate
+  delivery.
+
+Known limits are listed in [STATUS](docs/STATUS.md#known-limits-and-deferred-decisions).
 
 Not implemented yet (Slice 2+):
 

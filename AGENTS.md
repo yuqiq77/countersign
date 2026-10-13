@@ -57,7 +57,7 @@ discussion that changes no state produces no routine record.
 | --- | --- |
 | `docs/STATUS.md` | Current focus, blockers, next steps, owner decisions |
 | `docs/adr/` | A decision that constrains future work (new file; index entry) |
-| `README.md` "Current scope" | What is implemented, in the same terms v4 §25 uses |
+| `README.md` "Current scope" | What is implemented, in the same terms v4 §25 uses: one bullet per capability, the guarantee in one or two sentences plus a link; mechanics stay in the ticket or ADR |
 | `docs/tickets/` (from Slice 2) | Scope, implementation result, verification evidence, remaining issues |
 
 New tickets stay uncommitted in the working tree until the owner has read
