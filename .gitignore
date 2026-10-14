@@ -42,6 +42,10 @@ test-results/
 # Local infrastructure state
 .temporal/
 
+# Local SQLite database (the default COUNTERSIGN_DATABASE_URL) and its journal
+*.db
+*.db-*
+
 # local agent state
 .codex/
 .claude/
@@ -56,3 +60,9 @@ config/operator/
 data/operator/
 jobagent-private/
 HANDOFF.md
+
+# Demo capture scripts and records stay local; only the media and its README are published
+docs/demo/*
+!docs/demo/*.gif
+!docs/demo/*.jpg
+!docs/demo/README.md
