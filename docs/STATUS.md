@@ -8,7 +8,8 @@ details stay in the gitignored `HANDOFF.md`.
 | Field | Value |
 | --- | --- |
 | As of | 2026-10-14 |
-| Branch | `scheduled-watch` (from `main` at `b15472c`), no remote |
+| Branch | `main`, tracking `origin/main` on the private GitHub remote |
+| CI | GitHub Python 3.12.15: 345 tests passed, 3 browser tests skipped (Chromium not configured); static checks and web typecheck/build passed |
 | Slice | Slice 1 and its core live paths verified; pending release/tag decision |
 | Focus | Ticket 004 Schedule and initial live backfill/recheck verified; two-week acceptance started; two review findings remain |
 | Deployed | Ticket 004 watch and ticket 003 final ATS-host line confirmed in the worker; subsequent stored-payload refactor not rebuilt |
@@ -22,8 +23,8 @@ details stay in the gitignored `HANDOFF.md`.
    and Schedule create/update/pause/resume passed on the deployment.
    Observe scheduled ticks and any takedown/republication, including
    whether Ashby moves `publishedAt`. Evidence is in the ticket.
-2. Before the remote and push: Slice 1 release boundary,
-   gitleaks/private-identifier sweep, release tag, v4 §25 claim review.
+2. Before a public release: Slice 1 release boundary, release tag and
+   v4 §25 claim review.
 3. Then the scan-report import, registries, calibration, traces and cost
    (v4 §24); research stays Slice 2.5 (ADR-011).
 
