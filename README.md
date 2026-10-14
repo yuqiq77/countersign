@@ -10,7 +10,17 @@ idempotent effects and an append-only audit trail, so a result can be
 traced to the page, the rule, the model call and the human decision behind
 it.
 
-The implementation baseline is [Architecture v4](docs/job-search-agent-architecture-v4.md). The project is currently in **Slice 1: one durable case**; runtime features described by the architecture are not claimed until their code, tests, and telemetry exist. [Current scope](#current-scope) lists what is implemented.
+**Status:** the core workflow runs on real postings; the scheduled watch is
+in a two-week live acceptance. [Current scope](#current-scope)
+lists what is built; [Architecture v4](docs/job-search-agent-architecture-v4.md)
+is the full design, and nothing in it is claimed before its code, tests and
+telemetry exist.
+
+Python · Temporal · FastAPI · PostgreSQL · Pydantic · Playwright · Next.js · Anthropic API
+
+<img src="docs/demo/case-detail.jpg" width="420" alt="A case awaiting sign-off: provenance, official verification, a versioned assessment and the pending human decision">
+
+*A case awaiting sign-off, with synthetic data and a fake model.*
 
 ## Why this exists
 
@@ -62,133 +72,6 @@ The question behind the project is not how to build a better job-search
 assistant, but what it takes to make an agentic workflow recoverable,
 reviewable, attributable and auditable.
 
-## Why Temporal for one user
-
-Temporal is heavy for a single-user tool, and it is here on purpose. The
-problems it solves already exist at n=1: fetches and model calls fail and
-must be retried without repeating their effects, an approval can wait up
-to seven days, and a worker can die mid-step. Without it, the same
-guarantees would have to be rebuilt from cron jobs, status columns and
-hand-written retry and timer code.
-
-The costs are accepted and written down: workflow code must stay
-deterministic (the import boundary that keeps I/O in Activities is enforced
-by import-linter), a Temporal service has to run, and idempotency still
-belongs to the application because Activities run at least once.
-[ADR-001](docs/adr/001-temporal-durable-workflow.md) records the decision
-and the conditions for revisiting it.
-
-## What it does not demonstrate
-
-It has one operator and a small, real workload, so it says nothing about
-scale (traffic, concurrency, horizontal scaling), multi-user security or
-team engineering process. Self-hosted Temporal on one host shows recovery
-from a worker crash, not host failover. Planned pieces that are not built
-yet, including authorization, traces, cost dashboards and evals, are
-listed under [Current scope](#current-scope).
-
-## Architecture at a glance
-
-```text
-Next.js Web → FastAPI API → Temporal Workflow → Python Activities
-                     │                            │
-                     └──── PostgreSQL ←──────────┘
-                                                  ↓
-                                      Capability Registry
-                                       ├─ official sources
-                                       └─ model provider
-```
-
-The codebase is a modular monolith with three eventual process entrypoints: `web`, `api`, and `worker`. PostgreSQL is the system of record; Temporal is the only durable workflow/background-job substrate.
-
-## Repository map
-
-```text
-apps/web/                    Next.js control-plane UI
-src/countersign/                Python modular monolith
-evals/                       semantic eval cases and harness
-infra/compose/               local/deployed Compose definitions (Slice 1)
-migrations/                  Alembic migrations (Slice 1)
-docs/adr/                    accepted architecture decisions
-tests/                       unit, workflow, integration, E2E, fixture, security tests
-```
-
-Important import boundaries: `countersign.domain` may import only `countersign.contracts`; `countersign.workflows` may import only `countersign.contracts` and `countersign.domain`. I/O belongs in Activities. Both rules are enforced by import-linter.
-
-## Decisions
-
-- [ADR-001 — Temporal durable workflow](docs/adr/001-temporal-durable-workflow.md)
-- [ADR-002 — PostgreSQL system of record](docs/adr/002-postgresql-system-of-record.md)
-- [ADR-003 — Three kinds of truth](docs/adr/003-separate-three-kinds-of-truth.md)
-- [ADR-004 — Central capability registry](docs/adr/004-central-capability-registry.md)
-- [ADR-005 — Official-source authority](docs/adr/005-official-source-authority.md)
-- [ADR-011 — Bounded company-research loop](docs/adr/011-bounded-company-research-loop.md)
-- [ADR-012 — Bounded page reader](docs/adr/012-bounded-page-reader.md)
-- [ADR-013 — Human attestation for unverified postings](docs/adr/013-human-attestation-for-unverified-postings.md)
-- [ADR-014 — Evidence loop through REQUEST_EVIDENCE](docs/adr/014-evidence-loop-through-request-evidence.md)
-- [ADR-015 — Render network policy](docs/adr/015-render-network-policy.md)
-- [ADR-016 — Scheduled watch](docs/adr/016-scheduled-watch.md)
-
-## Local checks
-
-The web dependency graph is pinned by `pnpm-lock.yaml`. Python runtime
-dependencies use bounded version ranges in `pyproject.toml`; there is no
-Python lock file yet. Pinning the image's dependency graph is a v4 §21
-item scheduled with the deployed image (Slice 5). The commands below are
-the ones CI runs. `pytest` skips the PostgreSQL channel unless
-`COUNTERSIGN_TEST_POSTGRES_URL` points at a disposable database (see
-`tests/integration/test_postgres.py`).
-
-The development formatter, Ruff, is pinned in `pyproject.toml` so local
-formatting and CI use the same version. Run `.venv/bin/ruff format .` to
-apply formatting before checking it.
-
-```bash
-python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/pyright
-.venv/bin/lint-imports
-.venv/bin/pytest
-
-pnpm install
-pnpm --dir apps/web typecheck
-pnpm --dir apps/web build
-```
-
-## Running locally
-
-```bash
-docker compose -f infra/compose/docker-compose.yml up --build
-```
-
-This starts PostgreSQL (host port :5435), self-hosted Temporal (+ UI on
-:8080), a one-shot Alembic migration, the API (:8000), the worker, and the
-web UI (:3001). All host ports bind to 127.0.0.1.
-The worker defaults to the deterministic fake model; set
-`COUNTERSIGN_MODEL_PROVIDER=anthropic`, `COUNTERSIGN_MODEL_ID`, and
-`ANTHROPIC_API_KEY` for live evaluations. Anthropic-compatible relays can set
-`ANTHROPIC_BASE_URL`. The unscripted fake reader leaves status unknown.
-Rendering uses Playwright and a Chromium binary named by
-`COUNTERSIGN_CHROMIUM_PATH`; the Compose image installs one and sets the
-path itself, host runs name their own or run without rendering.
-The evaluator judges fit against an operator profile
-only when `COUNTERSIGN_OPERATOR_PROFILE_PATH` names one — a gitignored
-Markdown file under `config/operator/`, given as a repository-relative path;
-Compose mounts that directory read-only at the same relative location in the
-worker. Unset, the prompt states that no candidate profile was provided and
-the model must not infer one. Explicitly pass the repository-root environment
-file when starting a live evaluation stack:
-
-```bash
-docker compose --env-file .env -f infra/compose/docker-compose.yml up --build
-```
-
-Crash-recovery demo: create a case from the web UI, `docker compose kill
-worker` mid-pipeline, `docker compose start worker`, and watch the case
-resume with no duplicate snapshot, evaluation, or audit event.
-
 ## Current scope
 
 Implemented (Slice 1 core plus parts of Slice 2):
@@ -208,9 +91,10 @@ Implemented (Slice 1 core plus parts of Slice 2):
 - **Ashby API verification.** A posting the board's public API publishes is
   verified without a model call; the page's own closure evidence still wins
   ([ticket 003](docs/tickets/003-ashby-adapter.md)).
-- **Scheduled watch.** Implemented and tested, not yet run live: it rechecks
-  cases awaiting a decision and admits new postings from watched Ashby and
-  Greenhouse boards into the same pipeline
+- **Scheduled watch.** Implemented and tested, running live under a two-week
+  acceptance since 2026-10-14: it rechecks cases awaiting a decision and
+  admits new postings from watched Ashby and Greenhouse boards into the same
+  pipeline
   ([ADR-016](docs/adr/016-scheduled-watch.md), [ticket 004](docs/tickets/004-scheduled-watch.md)).
 - **Human approval.** The system's APPLY_NOW framing needs an official OPEN;
   approving a posting without one is recorded as the reviewer's own
@@ -229,8 +113,6 @@ Implemented (Slice 1 core plus parts of Slice 2):
   tests under Temporal's time-skipping environment, including duplicate
   delivery.
 
-Known limits are listed in [STATUS](docs/STATUS.md#known-limits-and-deferred-decisions).
-
 Not implemented yet (Slice 2+):
 
 - further ATS adapters (Lever, SmartRecruiters), importing external scan
@@ -238,3 +120,85 @@ Not implemented yet (Slice 2+):
   enforcement, prompt/policy version registry;
 - authorization, failure inbox UI, OTel traces and cost dashboard;
 - golden evals, calibration, policy promotion.
+
+## Limitations
+
+It has one operator and a small, real workload, and it does not show scale
+(traffic, concurrency, horizontal scaling), multi-user security or team
+engineering process. The recovery shown below is a worker killed on a single
+host, not host failover. Known technical limits are listed in
+[STATUS](docs/STATUS.md#known-limits).
+
+## Why Temporal for one user
+
+Temporal is heavy for a single-user tool, and it is here by design. The
+problems it solves already exist at n=1: fetches and model calls fail and
+must be retried without repeating their effects, an approval can wait up
+to seven days, and a worker can die mid-step. Without Temporal, the same
+guarantees would have to be rebuilt from cron jobs, status columns and
+hand-written retry and timer logic.
+
+<img src="docs/demo/worker-recovery.gif" width="560" alt="Temporal UI: the worker is killed after the snapshot commits, and attempt 2 on a fresh worker completes the same run">
+
+*Worker recovery in the Temporal UI, condensed to 22 seconds (the
+180-second timeout wait is cut and labelled). The worker is killed after the
+snapshot commits; attempt 2 on a fresh worker continues the same run without
+a duplicate record. Inputs and model output are synthetic; the workflow,
+PostgreSQL and Temporal are real.*
+
+The costs are accepted and written down: workflow code must stay
+deterministic (the import boundary that keeps I/O in Activities is enforced
+by import-linter), a Temporal service has to run, and idempotency still
+belongs to the application because Activities run at least once.
+[ADR-001](docs/adr/001-temporal-durable-workflow.md) records the decision
+and the conditions for revisiting it.
+
+## Architecture at a glance
+
+```text
+Next.js Web → FastAPI API → Temporal Workflow → Python Activities
+                     │                            │
+                     └──── PostgreSQL ←──────────┘
+                                                  ↓
+                                      Capability Registry
+                                       ├─ official sources
+                                       └─ model provider
+```
+
+A modular monolith with three process entrypoints: `web`, `api` and
+`worker`. PostgreSQL is the system of record; Temporal is the only durable
+workflow and background-job substrate. `countersign.domain` imports only
+`countersign.contracts`, and `countersign.workflows` only those two, so all
+I/O lives in Activities; import-linter enforces both rules.
+
+```text
+apps/web/          Next.js control-plane UI
+src/countersign/   Python modular monolith
+tests/             unit, workflow, integration and security tests
+migrations/        Alembic migrations
+infra/compose/     Compose definitions
+docs/adr/          architecture decisions
+```
+
+## Where to look
+
+- [`domain/verification.py`](src/countersign/domain/verification.py): the
+  decision table that sets a posting's status.
+- [`workflows/job_case.py`](src/countersign/workflows/job_case.py): one
+  case's durable lifecycle, from snapshot to human approval.
+- [`agents/page_reader.py`](src/countersign/agents/page_reader.py): the
+  bounded page reader, the only loop the model drives.
+- Decisions: [ADR-001](docs/adr/001-temporal-durable-workflow.md) (Temporal),
+  [ADR-012](docs/adr/012-bounded-page-reader.md) (bounded reader) and
+  [ADR-013](docs/adr/013-human-attestation-for-unverified-postings.md)
+  (human approval); the [ADR index](docs/adr/README.md) lists them all.
+
+## Running it
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up --build
+```
+
+This starts the stack with a deterministic fake model; the web UI is on
+:3001 and the Temporal UI on :8080. Live model setup, the local checks and
+the crash-recovery demo are in [docs/development.md](docs/development.md).
