@@ -407,5 +407,71 @@ responses and model providers were fakes. `pnpm --dir apps/web typecheck`
 and `pnpm --dir apps/web build` passed. This verification did not deploy,
 create a Schedule or invoke a live model.
 
-Not yet verified: the Schedule on a real Temporal server (create, update,
-pause, resume), and the live acceptance above.
+### Live activation and initial acceptance — 2026-10-14
+
+The private watchlist and environment path were configured. The worker
+image was built on 2026-10-12 from the ticket 004 source (`a15cc23`, with
+`ea81a60` on top adding only documentation); the later stored-payload
+refactor `4d487fa` is not deployed. The bootstrap window covered every
+currently listed posting that passed the region filter.
+The existing per-run budget was retained across three manual Schedule triggers,
+followed by restoration of the regular window and a fourth trigger for dedupe
+and rechecks.
+
+Observed on the live `countersign` PostgreSQL database at
+`127.0.0.1:5435` and the actual Temporal server at `127.0.0.1:7233`:
+
+- The worker created the Schedule. Calling the existing
+  `sync_watch_schedule` with no policy paused it; passing the validated
+  policy resumed it; repeating the update was idempotent. No workflow
+  was started by those lifecycle checks. The final Schedule is active
+  and its note matches the regular policy fingerprint.
+- Four manual triggers ran through that Schedule. Discovery created
+  **5, 5, 4, then 0** cases. All **14 new cases** completed official OPEN
+  verification, a real evaluator call and approval creation, and reached
+  PENDING_APPROVAL. Together with two pre-existing cases, all 16 matching
+  postings were covered, with no duplicate posting identities. The
+  seven nonmatching postings were excluded.
+- The final run rechecked **22** pending cases, **20 without a model
+  call**, and made **2** reader calls for other existing cases. All 14
+  newly discovered cases were rechecked through the Ashby adapter with
+  no model steps. There were no recheck failures. Admission and charging
+  stayed within each run's budgets; there were 14 evaluator calls
+  without repair and 10 reader calls across the four runs' rechecks.
+- The approval evidence pinned before the later runs was unchanged.
+  The already-approved case received no new verification. No human
+  decision was submitted. No source closure or reappearance occurred.
+- Read-only HTTP checks of `/healthz`, `/v1/cases` and all 14 new case
+  detail endpoints returned 200. Each new case detail exposed its OPEN
+  verification, evaluation and pending approval.
+
+Operator-only checks:
+`.venv/bin/python data/operator/watch-validation-20261014/verify_watch.py`
+with `baseline`, `lifecycle`, `trigger`, `status` and `schedule`, then
+`.venv/bin/python data/operator/watch-validation-20261014/assert_evidence.py`.
+The latter passed assertions against the retained before/after records.
+Database inspection was read-only; real writes and model calls came
+through the worker's normal workflows.
+
+Current working-tree checks, existing Python 3.14.3 venv:
+
+- `.venv/bin/ruff check .`: passed;
+  `.venv/bin/ruff format --check .`: 130 files already formatted;
+  `.venv/bin/pyright`: 0 errors;
+  `.venv/bin/lint-imports`: 3 contracts kept.
+- `.venv/bin/pytest -ra`: **348 passed, no skips**, with
+  `COUNTERSIGN_TEST_POSTGRES_URL` set to the disposable
+  `countersign_watch_live_validation_20261014` database at
+  `127.0.0.1:5435` (dropped afterwards), SQLite fixtures elsewhere,
+  Temporal's test server and local Chrome. Private policy inputs and
+  provider credentials were unset; models and external source responses
+  in tests were fakes. The first invocation had 345 passes and three
+  render tests skipped; configuring the installed Chrome path and
+  rerunning the suite produced the full result above.
+- `pnpm --dir apps/web typecheck` and `pnpm --dir apps/web build`: passed.
+
+The two-week live acceptance started on 2026-10-14 and cannot complete
+before 2026-10-28. Natural calendar ticks, catch-up/overlap behavior,
+live closure/republication and the Greenhouse live path remain
+unverified. The two reproduced review findings above remain open; this
+initial acceptance does not close the ticket or mark the slice done.
