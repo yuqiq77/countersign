@@ -10,11 +10,11 @@ ADRs capture decisions that constrain implementation. They are append-only decis
 | [ADR-004](004-central-capability-registry.md) | Govern external calls through a central capability registry | Accepted |
 | [ADR-005](005-official-source-authority.md) | Official-source authority and stale-job policy | Accepted |
 | [ADR-011](011-bounded-company-research-loop.md) | Bounded company-research loop activates model-invoked capabilities | Accepted |
-| [ADR-012](012-bounded-page-reader.md) | Bounded page reader in front of verification: the model chooses render/follow/done inside code-enforced budgets; code binds citations to observed controls and sources, decides status, and degrades conservatively | Accepted |
-| [ADR-013](013-human-attestation-for-unverified-postings.md) | `UNVERIFIED` replaces `UNKNOWN_STALE_RISK`; the reviewer may approve any pending case, and approving one the system did not verify `OPEN` is recorded as their own verification with its own audit event (amended 2026-09-27: the typed attestation was removed; the model's apply-now framing stays gated) | Accepted |
-| [ADR-014](014-evidence-loop-through-request-evidence.md) | The reason of a `REQUEST_EVIDENCE` decision is the operator-supplied context; the decision starts the next generation (re-verify, re-evaluate with the context attributed, new approval), bounded to three rounds | Accepted |
-| [ADR-015](015-render-network-policy.md) | Render network policy: the main document stays on the page host and its subdomains; resources may load from any host the fetched HTML names, DNS-pinned and read-only, without domain guesses or vendor lists | Accepted |
-| [ADR-016](016-scheduled-watch.md) | Scheduled watch: one Temporal Schedule discovers postings on watched ATS boards into the governed pipeline and rechecks pending cases; stateless discovery over a lookback window with posting-derived case ids, two budgets, closure by the decision table plus board absence on two consecutive rechecks | Accepted |
+| [ADR-012](012-bounded-page-reader.md) | A bounded page reader in front of verification | Accepted |
+| [ADR-013](013-human-attestation-for-unverified-postings.md) | Approving a posting the system did not verify is the reviewer's own verification | Accepted, amended 2026-09-27 |
+| [ADR-014](014-evidence-loop-through-request-evidence.md) | Reviewer context starts a new round, up to three | Accepted |
+| [ADR-015](015-render-network-policy.md) | Render network policy: navigation versus resource hosts | Accepted |
+| [ADR-016](016-scheduled-watch.md) | Scheduled watch: board discovery and rechecks of pending cases | Accepted |
 
 The implementation baseline is [Architecture v4](../job-search-agent-architecture-v4.md).
 
