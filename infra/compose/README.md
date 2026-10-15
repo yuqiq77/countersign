@@ -1,17 +1,19 @@
-# Compose Infrastructure
+# Compose
 
-Slice 1 will add the reproducible runtime profile:
+`docker-compose.yml` runs the whole stack on one host, with every port
+bound to 127.0.0.1:
 
-```text
-postgres
-temporal
-temporal-ui
-api
-worker
-web
-```
+| Service | Role | Host port |
+|---|---|---|
+| `postgres` | system of record, also holding Temporal's databases | 5435 |
+| `temporal`, `temporal-ui` | workflow server and its UI | 7233, 8080 |
+| `migrate` | one-shot `alembic upgrade head` | — |
+| `api` | FastAPI | 8000 |
+| `worker` | Temporal worker; mounts `config/operator/` read-only | — |
+| `web` | Next.js UI | 3001 |
 
-Telemetry is an optional profile. Raw source bodies stay in PostgreSQL initially, so MinIO is not part of the first stack. Services must use health/readiness checks; startup order is not a substitute for readiness.
-
-The deployed single-host demo demonstrates process recovery, not host high availability.
-
+PostgreSQL starts on a health check, and the API and worker wait for the
+migration to finish. The ports are shifted from the defaults on purpose
+(see `AGENTS.md`). One host shows recovery from a worker crash, not high
+availability. Running it is described in
+[docs/development.md](../../docs/development.md).

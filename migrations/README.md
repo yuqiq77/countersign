@@ -1,6 +1,6 @@
 # Database Migrations
 
-Alembic configuration and the initial schema arrive with Slice 1, when the first persistence model exists. Migrations will be tested from an empty database and from the previous release snapshot.
-
-This directory is intentionally not populated with a no-op “initial” migration.
-
+Alembic migrations for the PostgreSQL system of record. `0001_initial`
+creates the full schema. Compose applies `alembic upgrade head` as the
+one-shot `migrate` service, and the API and worker start only after it
+succeeds. `tests/integration/test_migrations.py` upgrades a fresh database.

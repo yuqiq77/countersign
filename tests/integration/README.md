@@ -1,4 +1,7 @@
 # Integration Tests
 
-Tests here cross real application boundaries such as API → Temporal → Activity → PostgreSQL. External sources and model providers remain controlled fixtures unless a separately budgeted live test is explicitly selected.
-
+Tests that cross a real boundary: the API against a database with Temporal
+stubbed at the client, Alembic upgrades, PostgreSQL-only behavior (when
+`COUNTERSIGN_TEST_POSTGRES_URL` names a disposable database) and a real
+browser render (when `COUNTERSIGN_CHROMIUM_PATH` is set). Sources and model
+providers stay fixtures.
