@@ -1,5 +1,7 @@
 # Countersign
 
+[![CI](https://github.com/yuqiq77/countersign/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yuqiq77/countersign/actions/workflows/ci.yml)
+
 A production-oriented workflow system for one narrow agentic task: checking
 whether a job posting is still open and worth applying to, and leaving a
 record a human can sign off on.
