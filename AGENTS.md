@@ -83,9 +83,8 @@ them.
   `COUNTERSIGN_TEST_POSTGRES_URL` pointing at a disposable database before
   claiming so (CI does, in `tests/integration/test_postgres.py`). Never
   point that variable at a database anyone cares about.
-- **Migration `0001` is unreleased and edited in place.** A local
-  `countersign.db` or a Compose `pgdata` volume older than the current
-  schema is deleted and re-migrated, not patched with a new migration.
+- **Migration `0001` is the v0.1.0 baseline.** Schema changes after it get
+  a new migration; databases are upgraded, not recreated.
 - **Ports are deliberately shifted** because other projects on the owner's
   machine hold the defaults: web `:3001`, PostgreSQL host `:5435`
   (container-internal 5432 unchanged), API `:8000`, Temporal `:7233` with
