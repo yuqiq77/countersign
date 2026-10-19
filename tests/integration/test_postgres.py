@@ -16,7 +16,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from countersign.contracts.enums import ActorType, ApprovalDecision, CaseState
+from countersign.contracts.enums import ActorType, ApprovalDecision, CaseGroup, CaseState
 from countersign.persistence import repo
 from countersign.persistence.db import reset_engine, session_scope
 
@@ -89,6 +89,45 @@ def test_full_repo_cycle_with_real_column_widths() -> None:
         # PostgreSQL round-trips timezone-aware datetimes.
         view = repo.approval_view(request)
         assert view.expires_at.tzinfo is not None
+
+
+@pytest.mark.usefixtures("postgres_db")
+def test_the_case_list_row_reads_on_postgresql() -> None:
+    """The list row's derived fields come back as the contract expects,
+    including a timezone-aware approval deadline."""
+
+    case_id = str(uuid.uuid4())
+    with session_scope() as session:
+        repo.create_case(session, case_id=case_id, url="https://example.com/jobs/2")
+        for state in (
+            CaseState.SNAPSHOTTED,
+            CaseState.NORMALIZED,
+            CaseState.DEDUPLICATED,
+            CaseState.OFFICIAL_SOURCE_VERIFIED,
+            CaseState.EVALUATED,
+            CaseState.PENDING_APPROVAL,
+        ):
+            repo.transition_case(
+                session,
+                case_id=case_id,
+                new_state=state,
+                actor_type=ActorType.SERVICE,
+                actor_id="worker",
+            )
+        repo.create_approval_request(
+            session,
+            case_id=case_id,
+            generation=1,
+            allowed=[ApprovalDecision.APPROVE],
+            expires_at=repo.utcnow() + timedelta(days=7),
+        )
+    with session_scope() as session:
+        row = repo.get_case(session, case_id)
+        assert row is not None
+        summary = repo.case_summary(session, row)
+    assert summary.group == CaseGroup.AWAITING_DECISION
+    assert summary.approval_expires_at is not None
+    assert summary.approval_expires_at.tzinfo is not None
 
 
 @pytest.mark.usefixtures("postgres_db")

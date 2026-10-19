@@ -27,7 +27,7 @@ from countersign.contracts.cases import (
 )
 from countersign.contracts.enums import ApprovalDecision, ApprovalRequestStatus, CaseState
 from countersign.contracts.workflow_io import CaseWorkflowInput, DecisionSignal
-from countersign.domain.gates import gated_decision
+from countersign.domain.gates import shown_decision
 from countersign.persistence import repo
 from countersign.persistence.db import session_scope
 from countersign.runtime import TASK_QUEUE, WORKFLOW_NAME, connect_client, workflow_id_for
@@ -119,7 +119,7 @@ async def create_case(
 @router.get("/cases", response_model=list[CaseSummary])
 def list_cases() -> list[CaseSummary]:
     with session_scope() as session:
-        return [repo.case_summary(row) for row in repo.list_cases(session)]
+        return [repo.case_summary(session, row) for row in repo.list_cases(session)]
 
 
 @router.get("/cases/{case_id}", response_model=CaseDetail)
@@ -132,11 +132,6 @@ def get_case(case_id: str) -> CaseDetail:
         verification = repo.latest_verification(session, case_id)
         evaluations = repo.evaluations_for_case(session, case_id)
         evaluation = evaluations[-1] if evaluations else None
-        gated = (
-            gated_decision(evaluation.evaluation, verification)
-            if evaluation is not None and verification is not None
-            else None
-        )
         snapshot, body_ref = repo.body_observation(session, case_id)
         return CaseDetail(
             case_id=row.id,
@@ -148,7 +143,9 @@ def get_case(case_id: str) -> CaseDetail:
             posting_authority=body_ref.authority if body_ref is not None else None,
             verification=verification,
             evaluation=evaluation,
-            gated_decision=gated,
+            gated_decision=shown_decision(
+                evaluation.evaluation if evaluation is not None else None, verification
+            ),
             approval=repo.approval_view(approval) if approval is not None else None,
             evaluations=evaluations,
             operator_context=repo.operator_context(session, case_id),

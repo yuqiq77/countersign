@@ -12,7 +12,11 @@ body {
   color: #f5f5f5;
 }
 
-a {
-  color: inherit;
+/* In the base layer so a link's own text-color utility wins: an unlayered
+   rule outranks every Tailwind layer. */
+@layer base {
+  a {
+    color: inherit;
+  }
 }
 

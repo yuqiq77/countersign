@@ -1,6 +1,17 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+// Derived by the server from stored records: which part of the list shows
+// the case. EXPIRED and SOURCE_CLOSED split CLOSED_OR_STALE.
+export type CaseGroup =
+  | "AWAITING_DECISION"
+  | "IN_PROGRESS"
+  | "APPROVED"
+  | "REJECTED"
+  | "EXPIRED"
+  | "SOURCE_CLOSED"
+  | "STOPPED";
+
 export interface CaseSummary {
   case_id: string;
   state: string;
@@ -9,6 +20,12 @@ export interface CaseSummary {
   company_hint: string | null;
   created_at: string;
   updated_at: string;
+  group: CaseGroup;
+  // The latest evaluation's decision after the status gate, as the case
+  // page shows it; null before an evaluation exists.
+  gated_decision: string | null;
+  // The pending approval's deadline; null unless a decision is awaited.
+  approval_expires_at: string | null;
 }
 
 export interface ApprovalRequestView {

@@ -25,12 +25,13 @@ from countersign.contracts.evaluation import EvaluationRecord
 from countersign.contracts.page_reading import ObservationRef, PageReadingRecord
 from countersign.contracts.provenance import SnapshotRecord
 from countersign.contracts.verification import VerificationResult
-from countersign.domain.gates import MAX_GENERATIONS
+from countersign.domain.gates import MAX_GENERATIONS, shown_decision
 from countersign.domain.ids import approval_request_id, verification_id
 from countersign.domain.states import (
     IN_FLIGHT_STATES,
     assert_transition,
     can_transition,
+    case_group,
     is_retry_noop,
 )
 from countersign.persistence.models import (
@@ -221,15 +222,38 @@ def set_case_facts(
     row.updated_at = utcnow()
 
 
-def case_summary(row: JobCaseRow) -> CaseSummary:
+def case_summary(session: Session, row: JobCaseRow) -> CaseSummary:
+    """One list row, derived from the same records the case page reads."""
+
+    state = CaseState(row.state)
+    verification = latest_verification(session, row.id)
+    evaluation = latest_evaluation(session, row.id)
+    approval = approval_for_case(session, row.id)
+    expires_at = None
+    if (
+        state == CaseState.PENDING_APPROVAL
+        and approval is not None
+        and approval.status == ApprovalRequestStatus.PENDING.value
+    ):
+        expires_at = ensure_utc(approval.expires_at)
     return CaseSummary(
         case_id=row.id,
-        state=CaseState(row.state),
+        state=state,
         url=row.url,
         title=row.title,
         company_hint=row.company_hint,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        group=case_group(
+            state,
+            in_flight=in_flight(session, row.id),
+            source_closed=verification is not None
+            and verification.status in (JobStatus.CLOSED, JobStatus.EXPIRED),
+        ),
+        gated_decision=shown_decision(
+            evaluation.evaluation if evaluation is not None else None, verification
+        ),
+        approval_expires_at=expires_at,
     )
 
 

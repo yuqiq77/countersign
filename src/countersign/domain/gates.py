@@ -58,3 +58,14 @@ def gated_decision(evaluation: ModelEvaluation, verification: VerificationResult
     if evaluation.decision == EvalDecision.APPLY_NOW and not apply_now_permitted(verification):
         return EvalDecision.WAIT
     return evaluation.decision
+
+
+def shown_decision(
+    evaluation: ModelEvaluation | None, verification: VerificationResult | None
+) -> EvalDecision | None:
+    """The gated decision the case page and the case list show; None until a
+    case has both an evaluation and a verification."""
+
+    if evaluation is None or verification is None:
+        return None
+    return gated_decision(evaluation, verification)

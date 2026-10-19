@@ -4,7 +4,7 @@ Pure logic — no I/O. Operational conditions (retries, schema repair,
 manual intervention) live on run records, never here.
 """
 
-from countersign.contracts.enums import ApprovalDecision, CaseState
+from countersign.contracts.enums import ApprovalDecision, CaseGroup, CaseState
 
 
 class TransitionError(Exception):
@@ -93,6 +93,20 @@ IN_FLIGHT_STATES: frozenset[CaseState] = frozenset(
     }
 )
 
+# Approved, and the application states after it; nothing records those yet.
+_APPROVED_GROUP: frozenset[CaseState] = frozenset(
+    {
+        CaseState.APPROVED,
+        CaseState.SUBMITTED,
+        CaseState.INTERVIEWING,
+        CaseState.NO_RESPONSE,
+        CaseState.WITHDRAWN,
+        CaseState.OFFERED,
+        CaseState.OUTCOME_REJECTED,
+        CaseState.HIRED,
+    }
+)
+
 # The single source for "which decision moves a case where" — imported by
 # both the workflow and the activity layer (both may import domain/).
 DECISION_TO_STATE: dict[ApprovalDecision, CaseState] = {
@@ -100,6 +114,30 @@ DECISION_TO_STATE: dict[ApprovalDecision, CaseState] = {
     ApprovalDecision.REJECT: CaseState.REJECTED,
     ApprovalDecision.REQUEST_EVIDENCE: CaseState.NEEDS_MORE_EVIDENCE,
 }
+
+
+def case_group(state: CaseState, *, in_flight: bool, source_closed: bool) -> CaseGroup:
+    """Where the case list shows a case.
+
+    `in_flight` is the server's own derivation (`repo.in_flight`), which
+    counts the evidence-loop re-round. `source_closed` says the latest
+    verification is CLOSED or EXPIRED: it separates a CLOSED_OR_STALE case
+    the source closed, at intake or on a recheck, from one whose approval
+    ran out while the posting still read as open or unverified.
+    """
+
+    if state == CaseState.PENDING_APPROVAL:
+        return CaseGroup.AWAITING_DECISION
+    if state in IN_FLIGHT_STATES or in_flight:
+        return CaseGroup.IN_PROGRESS
+    if state in _APPROVED_GROUP:
+        return CaseGroup.APPROVED
+    if state == CaseState.REJECTED:
+        return CaseGroup.REJECTED
+    if state == CaseState.CLOSED_OR_STALE:
+        return CaseGroup.SOURCE_CLOSED if source_closed else CaseGroup.EXPIRED
+    # QUARANTINED, or NEEDS_MORE_EVIDENCE with no round due.
+    return CaseGroup.STOPPED
 
 
 def can_transition(current: CaseState, requested: CaseState) -> bool:

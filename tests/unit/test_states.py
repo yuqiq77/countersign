@@ -89,3 +89,44 @@ def test_verified_case_may_stop_for_evidence_before_evaluation() -> None:
 
     assert_transition(CaseState.OFFICIAL_SOURCE_VERIFIED, CaseState.NEEDS_MORE_EVIDENCE)
     assert_transition(CaseState.NEEDS_MORE_EVIDENCE, CaseState.OFFICIAL_SOURCE_VERIFIED)
+
+
+def test_every_state_has_a_list_group() -> None:
+    """The case list's groups cover every state; CLOSED_OR_STALE splits on
+    whether the source closed the posting or the approval ran out."""
+
+    from countersign.contracts.enums import CaseGroup
+    from countersign.domain.states import IN_FLIGHT_STATES, case_group
+
+    for state in CaseState:
+        group = case_group(state, in_flight=state in IN_FLIGHT_STATES, source_closed=False)
+        assert isinstance(group, CaseGroup), state
+
+    assert case_group(CaseState.PENDING_APPROVAL, in_flight=True, source_closed=False) == (
+        CaseGroup.AWAITING_DECISION
+    )
+    assert case_group(CaseState.EVALUATED, in_flight=True, source_closed=False) == (
+        CaseGroup.IN_PROGRESS
+    )
+    # The evidence-loop re-round is in progress; without one the case stopped.
+    assert case_group(CaseState.NEEDS_MORE_EVIDENCE, in_flight=True, source_closed=False) == (
+        CaseGroup.IN_PROGRESS
+    )
+    assert case_group(CaseState.NEEDS_MORE_EVIDENCE, in_flight=False, source_closed=False) == (
+        CaseGroup.STOPPED
+    )
+    assert case_group(CaseState.QUARANTINED, in_flight=False, source_closed=False) == (
+        CaseGroup.STOPPED
+    )
+    assert case_group(CaseState.APPROVED, in_flight=False, source_closed=False) == (
+        CaseGroup.APPROVED
+    )
+    assert case_group(CaseState.REJECTED, in_flight=False, source_closed=False) == (
+        CaseGroup.REJECTED
+    )
+    assert case_group(CaseState.CLOSED_OR_STALE, in_flight=False, source_closed=True) == (
+        CaseGroup.SOURCE_CLOSED
+    )
+    assert case_group(CaseState.CLOSED_OR_STALE, in_flight=False, source_closed=False) == (
+        CaseGroup.EXPIRED
+    )

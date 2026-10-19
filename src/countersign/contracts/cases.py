@@ -8,6 +8,7 @@ from countersign.contracts.base import ContractModel, JsonBoundaryModel
 from countersign.contracts.enums import (
     ApprovalDecision,
     ApprovalRequestStatus,
+    CaseGroup,
     CaseState,
     EvalDecision,
     SourceAuthority,
@@ -41,6 +42,13 @@ class CaseSummary(ContractModel):
     company_hint: str | None
     created_at: datetime
     updated_at: datetime
+    # Derived from stored records (`domain.states.case_group`).
+    group: CaseGroup
+    # The latest evaluation's decision after the status gate, as the case
+    # page shows it; None before a case has an evaluation and a verification.
+    gated_decision: EvalDecision | None
+    # When the pending approval expires; None unless a decision is awaited.
+    approval_expires_at: datetime | None
 
 
 class ApprovalRequestView(ContractModel):

@@ -15,6 +15,8 @@ from countersign.api.app import create_app
 from countersign.contracts.enums import (
     ApprovalDecision,
     ApprovalRequestStatus,
+    CaseState,
+    EvalDecision,
     JobStatus,
     SourceAuthority,
 )
@@ -106,7 +108,7 @@ async def test_idempotent_replay_of_a_started_case_starts_nothing(
     format or the earlier per-generation one — so a replayed intake returns
     the case and must not start a second workflow for it."""
 
-    from countersign.contracts.enums import ActorType, CaseState
+    from countersign.contracts.enums import ActorType
 
     async with _client() as client:
         first = await client.post(
@@ -408,7 +410,7 @@ async def test_request_evidence_is_accepted_below_the_cap_and_refused_at_it(
 async def test_case_detail_exposes_operator_context_and_in_flight(
     stub_temporal: _StubTemporal,
 ) -> None:
-    from countersign.contracts.enums import ActorType, CaseState
+    from countersign.contracts.enums import ActorType
     from countersign.domain.ids import verification_id
 
     approval_id = _seed_approval(allowed=_GATED, status=ApprovalRequestStatus.PENDING)
@@ -548,3 +550,157 @@ async def test_case_detail_shows_the_authority_the_reading_gave_the_body(
     # judgment is its own field.
     assert detail["snapshot"]["authority_level"] == "COMPANY_CONTROLLED"
     assert detail["posting_authority"] == "OFFICIAL_COMPANY"
+
+
+def _seed_listed_case(
+    case_id: str,
+    *,
+    status: JobStatus,
+    decision: EvalDecision,
+    approval: ApprovalRequestStatus,
+    final: CaseState | None = None,
+) -> None:
+    """A case taken through evaluation to an approval request, then on to
+    `final` when given, with one verification and one evaluation."""
+
+    from countersign.contracts.enums import ActorType, CompensationSignal, SeniorityFit
+    from countersign.contracts.evaluation import EvaluationRecord, ModelEvaluation, ModelUsage
+
+    with session_scope() as session:
+        repo.create_case(session, case_id=case_id, url=f"{PUBLIC_URL}{case_id}")
+        repo.record_verification(
+            session,
+            verification_id=f"ver-{case_id}-g1",
+            result=VerificationResult(
+                case_id=case_id,
+                status=status,
+                authority=SourceAuthority.OFFICIAL_ATS,
+                checked_at=repo.utcnow(),
+                http_status=200,
+                final_url=PUBLIC_URL,
+                reason="seeded",
+                apply_markers_found=status == JobStatus.OPEN,
+                closed_markers_found=status == JobStatus.CLOSED,
+            ),
+        )
+        repo.record_evaluation(
+            session,
+            EvaluationRecord(
+                evaluation_id=f"eval-{case_id}-g1",
+                case_id=case_id,
+                evaluation=ModelEvaluation(
+                    decision=decision,
+                    application_status=status,
+                    skill_capital=5,
+                    strategic_alignment=5,
+                    learning_velocity=5,
+                    drift_risk=5,
+                    domain_lock_in_risk=5,
+                    transition_feasibility=5,
+                    seniority_fit=SeniorityFit.PLAUSIBLE_STRETCH,
+                    confidence=0.5,
+                    summary="seeded",
+                ),
+                compensation_signal=CompensationSignal.UNKNOWN,
+                policy_version="test",
+                prompt_version="test",
+                model_route="fake",
+                usage=ModelUsage(
+                    model_id="fake",
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_read_input_tokens=0,
+                    cache_creation_input_tokens=0,
+                    latency_ms=0,
+                    repair_attempts=0,
+                ),
+            ),
+        )
+        row = repo.create_approval_request(
+            session,
+            case_id=case_id,
+            generation=1,
+            allowed=[ApprovalDecision.APPROVE, ApprovalDecision.REJECT],
+            expires_at=repo.utcnow() + timedelta(days=7),
+            verification_id=f"ver-{case_id}-g1",
+            evaluation_id=f"eval-{case_id}-g1",
+        )
+        row.status = approval.value
+        for state in (
+            CaseState.SNAPSHOTTED,
+            CaseState.NORMALIZED,
+            CaseState.DEDUPLICATED,
+            CaseState.OFFICIAL_SOURCE_VERIFIED,
+            CaseState.EVALUATED,
+            CaseState.PENDING_APPROVAL,
+            *([final] if final is not None else []),
+        ):
+            repo.transition_case(
+                session,
+                case_id=case_id,
+                new_state=state,
+                actor_type=ActorType.SERVICE,
+                actor_id="worker",
+            )
+
+
+@pytest.mark.usefixtures("db")
+async def test_case_list_groups_cases_and_shows_the_gated_decision(
+    stub_temporal: _StubTemporal,
+) -> None:
+    """The list derives each case's group from stored records, splits
+    CLOSED_OR_STALE into a run-out approval and a source closure, and shows
+    the gated decision the case page shows."""
+
+    pending = ApprovalRequestStatus.PENDING
+    expired = ApprovalRequestStatus.EXPIRED
+    _seed_listed_case(
+        "open", status=JobStatus.OPEN, decision=EvalDecision.STRETCH, approval=pending
+    )
+    _seed_listed_case(
+        "gated", status=JobStatus.UNVERIFIED, decision=EvalDecision.APPLY_NOW, approval=pending
+    )
+    _seed_listed_case(
+        "ran-out",
+        status=JobStatus.OPEN,
+        decision=EvalDecision.SKIP,
+        approval=expired,
+        final=CaseState.CLOSED_OR_STALE,
+    )
+    _seed_listed_case(
+        "gone",
+        status=JobStatus.CLOSED,
+        decision=EvalDecision.SKIP,
+        approval=expired,
+        final=CaseState.CLOSED_OR_STALE,
+    )
+    _seed_listed_case(
+        "declined",
+        status=JobStatus.OPEN,
+        decision=EvalDecision.NETWORK,
+        approval=ApprovalRequestStatus.DECIDED,
+        final=CaseState.REJECTED,
+    )
+    with session_scope() as session:
+        repo.create_case(session, case_id="new", url=f"{PUBLIC_URL}new")
+
+    async with _client() as client:
+        listed = {c["case_id"]: c for c in (await client.get("/v1/cases")).json()}
+        gated_detail = (await client.get("/v1/cases/gated")).json()
+
+    assert {case_id: c["group"] for case_id, c in listed.items()} == {
+        "open": "AWAITING_DECISION",
+        "gated": "AWAITING_DECISION",
+        "ran-out": "EXPIRED",
+        "gone": "SOURCE_CLOSED",
+        "declined": "REJECTED",
+        "new": "IN_PROGRESS",
+    }
+    assert listed["open"]["gated_decision"] == "STRETCH"
+    # APPLY_NOW without a verified OPEN is shown as the gate leaves it.
+    assert listed["gated"]["gated_decision"] == "WAIT" == gated_detail["gated_decision"]
+    assert listed["new"]["gated_decision"] is None
+    # Only an awaited decision has a deadline.
+    assert listed["open"]["approval_expires_at"] is not None
+    assert listed["ran-out"]["approval_expires_at"] is None
+    assert listed["declined"]["approval_expires_at"] is None

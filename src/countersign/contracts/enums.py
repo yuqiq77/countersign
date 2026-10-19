@@ -99,6 +99,22 @@ class CaseState(StrEnum):
     CLOSED_OR_STALE = "CLOSED_OR_STALE"
 
 
+class CaseGroup(StrEnum):
+    """Where the case list shows a case, derived from stored records.
+
+    EXPIRED and SOURCE_CLOSED split CLOSED_OR_STALE: the approval ran out
+    without a decision, or the source itself closed the posting.
+    """
+
+    AWAITING_DECISION = "AWAITING_DECISION"
+    IN_PROGRESS = "IN_PROGRESS"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    SOURCE_CLOSED = "SOURCE_CLOSED"
+    STOPPED = "STOPPED"
+
+
 class EvalDecision(StrEnum):
     """Recommendation bands of the evaluation policy."""
 
