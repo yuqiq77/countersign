@@ -475,3 +475,33 @@ before 2026-10-28. Natural calendar ticks, catch-up/overlap behavior,
 live closure/republication and the Greenhouse live path remain
 unverified. The two reproduced review findings above remain open; this
 initial acceptance does not close the ticket or mark the slice done.
+
+### Scheduled runs — 2026-10-16 and 2026-10-19
+
+Read-only queries of the live database on 2026-10-19 (`watch.run`,
+`approval.expired` and `case.state.closed_or_stale` audit events,
+verification and reading records):
+
+- Two calendar ticks of the regular Schedule ran; their workflow ids
+  carry the scheduled times. Both read the board (HTTP 200) and created
+  no case, since every matching posting was already known.
+- The first tick rechecked 22 pending cases, 19 without a model call
+  (4 recheck model calls). Seven approvals then expired after seven days
+  without a decision, through the existing expiry path.
+- The second tick saw three fewer postings on the board, two of them
+  matching. It rechecked the 15 cases still pending, 12 without a model
+  call (3 recheck model calls), and closed the two watch-created cases
+  whose postings had gone. For each, the Ashby lookup noted the job as
+  not published, the step-0 pre-render showed a 111-character "page not
+  found" page, the reader cited it as a closed notice, and the
+  verification was CLOSED ("closed notice observed"). The `source_closed`
+  Signal expired the pending approval with "source closed on recheck:
+  closed notice observed", and the case moved to CLOSED_OR_STALE. The
+  closed notice decided these closures on the first recheck after the
+  takedown; the board-absence chain was not needed.
+- No recheck failed and no posting reappeared.
+
+Still unverified: closure by board absence on two consecutive rechecks,
+republication (including whether Ashby moves `publishedAt`), missed-run
+catch-up, overlap skipping and the Greenhouse live path. The two
+reproduced review findings remain open.

@@ -101,6 +101,9 @@ Implemented (Slice 1 core plus parts of Slice 2):
 - **Human approval.** The system's APPLY_NOW framing needs an official OPEN;
   approving a posting without one is recorded as the reviewer's own
   verification ([ADR-013](docs/adr/013-human-attestation-for-unverified-postings.md)).
+  The case list orders cases awaiting a decision by the gated
+  recommendation and files the rest by outcome: approved, rejected,
+  expired without a decision, closed at source.
 - **Evidence loop.** Reviewer context starts another round of verification
   and evaluation, up to three ([ADR-014](docs/adr/014-evidence-loop-through-request-evidence.md)).
 - **Model gateway.** Structured output against Pydantic contracts, bounded
