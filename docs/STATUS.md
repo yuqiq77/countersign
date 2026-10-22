@@ -26,8 +26,12 @@ details stay in the gitignored `HANDOFF.md`.
    observe: republication (including whether Ashby moves `publishedAt`),
    closure by board absence, missed-run catch-up and overlap skipping.
    Evidence is in the ticket.
-2. Then the scan-report import, registries, calibration, traces and cost
-   (v4 §24); research stays Slice 2.5 (ADR-011).
+2. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
+   accepted 2026-10-22): a search from a brief derived from the profile and
+   a small-model screen for search and board candidates, on its own
+   branch; it replaces the scan-report import. Then registries,
+   calibration, traces and cost (v4 §24); research stays Slice 2.5
+   (ADR-011).
 
 ## Not yet observed live
 
@@ -65,6 +69,7 @@ Tests cover the case rules; Schedule lifecycle was checked on the real server.
 ## Owner decisions pending
 
 Rubric and blocker wording, no-profile scoring, official-domain and board
-policy, public claims, and v4 updates for the reader and evidence loop.
+policy, public claims, and v4 updates for the reader, the evidence loop
+and ADR-017 (§11 discovery, §15 the first model-chosen tool).
 Deferred: structured context effects, stricter cookie matching, evaluator
 replay and generic JS navigation.

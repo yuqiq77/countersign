@@ -120,9 +120,10 @@ Implemented (Slice 1 core plus parts of Slice 2):
 
 Not implemented yet (Slice 2+):
 
-- further ATS adapters (Lever, SmartRecruiters), importing external scan
-  reports, rechecks of approved cases, capability registry policy
-  enforcement, prompt/policy version registry;
+- profile-driven discovery ([ADR-017](docs/adr/017-profile-driven-discovery.md)),
+  further ATS adapters (Lever, SmartRecruiters), rechecks of approved
+  cases, capability registry policy enforcement, prompt/policy version
+  registry;
 - authorization, failure inbox UI, OTel traces and cost dashboard;
 - golden evals, calibration, policy promotion.
 

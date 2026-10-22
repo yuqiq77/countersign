@@ -1,6 +1,9 @@
 # ADR-016: Scheduled watch — the first autonomous actor
 
-- Status: accepted (2026-10-11, with ticket 004)
+- Status: accepted (2026-10-11, with ticket 004); superseded in part by
+  [ADR-017](017-profile-driven-discovery.md) (2026-10-22): decision 2's
+  "the watch never judges relevance" and the rejected alternative "LLM
+  triage of candidates before intake"
 - Date: 2026-10-11
 - Extends: ADR-001 (Temporal is the only background system), ADR-005
   (official-source authority, closure evidence), ADR-011 (no widening of

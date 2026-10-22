@@ -14,7 +14,8 @@ ADRs capture decisions that constrain implementation. They are append-only decis
 | [ADR-013](013-human-attestation-for-unverified-postings.md) | Approving a posting the system did not verify is the reviewer's own verification | Accepted, amended 2026-09-27 |
 | [ADR-014](014-evidence-loop-through-request-evidence.md) | Reviewer context starts a new round, up to three | Accepted |
 | [ADR-015](015-render-network-policy.md) | Render network policy: navigation versus resource hosts | Accepted |
-| [ADR-016](016-scheduled-watch.md) | Scheduled watch: board discovery and rechecks of pending cases | Accepted |
+| [ADR-016](016-scheduled-watch.md) | Scheduled watch: board discovery and rechecks of pending cases | Accepted, superseded in part by ADR-017 |
+| [ADR-017](017-profile-driven-discovery.md) | Discovery inside the system: a profile-driven search and a coarse screen | Accepted |
 
 The implementation baseline is [Architecture v4](../job-search-agent-architecture-v4.md).
 
