@@ -296,3 +296,34 @@ def test_concurrent_fetches_to_one_address_never_share_a_session(
     assert seen["b.example"] is None  # never case A's session
     assert seen["a.example"] == "session=case_a"  # A's own hop still carries it
     assert results == {"a": b"a.example", "b": b"b.example"}
+
+
+def test_a_refused_hop_stops_the_fetch_before_its_request() -> None:
+    """The reader's FOLLOW passes the terms list (ADR-017): a redirect onto a
+    listed host is not requested; without the hook the redirect is followed."""
+
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.host == "example.com":
+            return httpx.Response(302, headers={"location": "https://www.linkedin.com/jobs/1"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<p>job</p>")
+
+    def refuse(url: str) -> str | None:
+        return "linkedin.com: listed" if "linkedin.com" in url else None
+
+    with pytest.raises(FetchPolicyError, match=r"not fetched: linkedin\.com"):
+        fetch_url(
+            "http://example.com/jobs/1",
+            transport=httpx.MockTransport(handler),
+            enforce_network_policy=False,
+            refuse_hop=refuse,
+        )
+    assert requested == ["http://example.com/jobs/1"]
+    followed = fetch_url(
+        "http://example.com/jobs/1",
+        transport=httpx.MockTransport(handler),
+        enforce_network_policy=False,
+    )
+    assert followed.final_url == "https://www.linkedin.com/jobs/1"

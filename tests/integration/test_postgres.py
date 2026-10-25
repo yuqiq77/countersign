@@ -375,3 +375,70 @@ def test_the_watchs_records_persist_within_column_widths() -> None:
         assert (case_id, approval_id) in [(row.id, approval.id) for row, approval in due]
         assert repo.awaits_decision(session, case_id, approval_id)
         assert not repo.awaits_decision(session, case_id, ids.approval_request_id(case_id, 2))
+
+
+@pytest.mark.usefixtures("postgres_db")
+def test_discovery_records_persist_within_column_widths() -> None:
+    """Migration 0002 on PostgreSQL: a candidate with a long URL and origin, its
+    verdict, a brief and a search request, with timezone-aware times back."""
+
+    from countersign.contracts.enums import CandidateSource, CandidateStatus, ScreenDecision
+    from countersign.domain.discovery import VerdictInputs, url_key
+    from countersign.gateway.fake_provider import FAKE_BRIEF
+    from countersign.persistence import discovery
+
+    url = f"https://careers.example.com/jobs/{uuid.uuid4()}/" + "a" * 1850 + "?gh_jid=42"
+    key = url_key(url)
+    with session_scope() as session:
+        row, created = discovery.record_sighting(
+            session,
+            posting_key=key,
+            url=url,
+            source=CandidateSource.SEARCH,
+            origin="site:careers.example.com " + "q" * 600,
+            title="t" * 600,
+            company="c" * 300,
+            locations=["Toronto"],
+            seen_at=repo.utcnow(),
+            status=CandidateStatus.UNSCREENED,
+            note="n" * 600,
+        )
+        assert created
+        discovery.record_verdict(
+            session,
+            row,
+            decision=ScreenDecision.PASS,
+            reason="platform",
+            failed_open=False,
+            inputs=VerdictInputs(
+                "abcd1234",
+                "discovery-screen/0.1.0",
+                "anthropic:claude-haiku-5-5",
+                "0123456789abcdef",
+            ),
+            usage={"model_id": "claude-haiku-5-5", "input_tokens": 1},
+            at=repo.utcnow(),
+        )
+        discovery.save_brief(
+            session,
+            profile_fingerprint="abcd1234",
+            prompt_version="discovery-brief/0.1.0",
+            route="anthropic:claude-haiku-5-5",
+            brief=FAKE_BRIEF,
+            usage=None,
+        )
+        discovery.record_search_request(
+            session,
+            run_key=uuid.uuid4().hex[:8],
+            attempt=4,
+            index=3,
+            queries=["q"],
+            searches=2,
+            usage={},
+        )
+    with session_scope() as session:
+        stored = discovery.get_candidate(session, key)
+        assert stored is not None
+        assert stored.first_passed_at is not None and stored.first_passed_at.tzinfo is not None
+        brief = discovery.latest_brief(session)
+        assert brief is not None and brief.created_at.tzinfo is not None

@@ -115,6 +115,34 @@ class CaseGroup(StrEnum):
     STOPPED = "STOPPED"
 
 
+class CandidateSource(StrEnum):
+    """Where a discovery candidate came from (ADR-017)."""
+
+    BOARD = "BOARD"
+    SEARCH = "SEARCH"
+
+
+class CandidateStatus(StrEnum):
+    """A discovery candidate's place in intake (ADR-017).
+
+    LEAD is a search result on a host whose terms forbid automated access:
+    recorded and listed, never screened or admitted.
+    """
+
+    UNSCREENED = "UNSCREENED"
+    PASS = "PASS"
+    DROP = "DROP"
+    LEAD = "LEAD"
+    ADMITTED = "ADMITTED"
+
+
+class ScreenDecision(StrEnum):
+    """The coarse screen's answer: whether the role is the kind of work the profile seeks."""
+
+    PASS = "PASS"
+    DROP = "DROP"
+
+
 class EvalDecision(StrEnum):
     """Recommendation bands of the evaluation policy."""
 

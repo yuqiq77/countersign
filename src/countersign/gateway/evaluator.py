@@ -314,7 +314,7 @@ def run_evaluation(
 
 
 @lru_cache(maxsize=4)
-def _provider_for(provider_name: str, model_id: str | None, base_url: str | None) -> ModelProvider:
+def provider_for(provider_name: str, model_id: str | None, base_url: str | None) -> ModelProvider:
     """One long-lived provider (and SDK client) per configuration."""
 
     if provider_name == "anthropic":
@@ -336,8 +336,8 @@ def resolve_provider() -> ModelProvider:
 
     provider_name = os.environ.get("COUNTERSIGN_MODEL_PROVIDER", "fake").lower()
     if provider_name != "anthropic":
-        return _provider_for(provider_name, None, None)
-    return _provider_for(
+        return provider_for(provider_name, None, None)
+    return provider_for(
         provider_name,
         optional_env("COUNTERSIGN_MODEL_ID") or "claude-opus-5",
         optional_env("ANTHROPIC_BASE_URL"),

@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 
 import countersign.activities.case_activities as case_activities
+import countersign.activities.discovery_activities as discovery_activities
 import countersign.activities.watch_activities as watch_activities
 from countersign.activities.case_activities import BOARD_ABSENCE, BOARD_ABSENCE_AGAIN
 from countersign.activities.watch_activities import case_id_for
@@ -39,6 +40,7 @@ from countersign.contracts.workflow_io import (
     DiscoveryOutcome,
     NewCases,
     NewPosting,
+    QueueInput,
     RecheckInput,
     RecheckOutcome,
 )
@@ -71,6 +73,8 @@ WATCHLIST = Watchlist(
     published_within_days=14,
     max_new_cases_per_run=3,
     max_recheck_model_calls_per_run=30,
+    max_searches_per_run=0,
+    max_discovery_model_calls_per_run=20,
 )
 
 
@@ -333,9 +337,12 @@ def test_a_posting_the_api_still_publishes_is_rechecked_open_without_the_model(
 
 
 @pytest.mark.usefixtures("db")
-def test_discovery_admits_the_newest_unknown_postings_that_pass_the_filter(
+def test_discovery_records_unknown_postings_that_pass_the_filter_as_board_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Admission is no longer the listing's: every posting in the window
+    that passes the filter is a candidate, queued newest first (ADR-017)."""
+
     listings = _boards(
         [
             ("a1", "Platform Engineer", "Toronto", NOW - DAY),
@@ -365,19 +372,20 @@ def test_discovery_admits_the_newest_unknown_postings_that_pass_the_filter(
         known=1,
         outside_window=1,
         reappeared=0,
-        admitted=[
-            NewPosting(
-                case_id=case_id_for("greenhouse:101"),
-                url="https://job-boards.greenhouse.io/globex/jobs/101",
-            ),
-            NewPosting(
-                case_id=case_id_for("ashby:acme:a1"), url="https://jobs.ashbyhq.com/acme/a1"
-            ),
-            NewPosting(
-                case_id=case_id_for("ashby:acme:a4"), url="https://jobs.ashbyhq.com/acme/a4"
-            ),
-        ],
+        recorded=4,
     )
+    queues = discovery_activities.discovery_queues(
+        QueueInput(
+            run_key="run-1", started_at=NOW, profile_fingerprint="none", published_within_days=14
+        )
+    )
+    assert queues.board_to_screen == [
+        "greenhouse:101",
+        "ashby:acme:a1",
+        "ashby:acme:a4",
+        "greenhouse:103",
+    ]
+    assert (queues.search_to_screen, queues.board_passed, queues.search_passed) == ([], [], [])
 
 
 @pytest.mark.usefixtures("db")
@@ -408,7 +416,7 @@ def test_a_closed_posting_listed_again_after_its_closure_is_recorded_once(
         outcome = watch_activities.discover_postings(
             DiscoverInput(watchlist=WATCHLIST, started_at=NOW + 30 * DAY)
         )
-        assert (outcome.known, outcome.admitted) == (2, [])
+        assert (outcome.known, outcome.recorded) == (2, 0)
         reappeared.append(outcome.reappeared)
 
     assert reappeared == [1, 0]

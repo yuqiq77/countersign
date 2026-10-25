@@ -24,6 +24,7 @@ from countersign.capabilities.http_fetch import (
     assert_url_allowed,
     vetted_addresses,
 )
+from countersign.capabilities.terms import restricted_host
 from countersign.env import optional_env
 
 _MAX_NAMED_HOSTS = 10
@@ -68,7 +69,8 @@ def render_hosts(url: str, body: bytes, deadline: float) -> RenderHosts:
     named = [base]
     for match in _HOST_IN_BODY.finditer(body):
         host = match.group(1).decode("ascii").lower()
-        if host not in named:
+        # No resource from a host whose terms forbid automated access (ADR-017).
+        if host not in named and restricted_host(f"https://{host}/") is None:
             named.append(host)
         if len(named) > _MAX_NAMED_HOSTS:
             break

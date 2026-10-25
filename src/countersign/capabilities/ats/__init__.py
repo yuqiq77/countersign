@@ -21,6 +21,11 @@ class ListedPosting:
     locations: tuple[str, ...]
     # The vendor's latest publication time (Ashby `publishedAt`, Greenhouse `updated_at`).
     published_at: datetime
+    # Listing facts for the coarse screen (ADR-017), where the API gives them:
+    # Ashby's department, team and the head of its plain description.
+    department: str | None = None
+    team: str | None = None
+    excerpt: str | None = None
 
 
 @dataclass(frozen=True)

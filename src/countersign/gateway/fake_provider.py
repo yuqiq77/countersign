@@ -4,16 +4,61 @@ import hashlib
 from typing import cast
 
 from countersign.contracts.base import ContractModel
+from countersign.contracts.discovery import (
+    ScreenVerdict,
+    SearchBrief,
+    SearchCandidates,
+)
 from countersign.contracts.enums import (
     ApplyEntryKind,
     EvalDecision,
     JobStatus,
     ReaderAction,
+    ScreenDecision,
     SeniorityFit,
 )
 from countersign.contracts.evaluation import ModelEvaluation
 from countersign.contracts.page_reading import ApplyEntry, PageReading, PageStep
-from countersign.gateway.provider import ContractFailure, ParsedResponse, ProviderResponse
+from countersign.gateway.provider import (
+    ContractFailure,
+    ParsedResponse,
+    ProviderResponse,
+    SearchResponse,
+)
+
+FAKE_BRIEF = SearchBrief(
+    role_families=["software engineer"],
+    skills=["python"],
+    regions=["example city"],
+    languages=["english"],
+    exclude_roles=["sales"],
+)
+
+
+def fake_search_response(
+    candidates: SearchCandidates | None = None,
+    *,
+    results: list[tuple[str, str]] | None = None,
+    searches: int = 0,
+    stop_reason: str = "end_turn",
+) -> SearchResponse:
+    """A search request's response as the fake backend gives it."""
+
+    found = results or []
+    return SearchResponse(
+        parsed=None
+        if stop_reason == "pause_turn"
+        else (candidates or SearchCandidates(candidates=[])),
+        stop_reason=stop_reason,
+        queries=sorted({query for query, _ in found}),
+        results=found,
+        searches=searches,
+        model_id="fake-model",
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
 
 
 def _score(seed: bytes, salt: str) -> int:
@@ -28,6 +73,11 @@ class FakeEvaluationProvider:
     gateway's repair path is testable without a live model. `page_steps`
     scripts the page reader: each call for a `PageStep` pops the next one;
     with none left the fake answers DONE with an empty reading (unassessed).
+    Discovery (ADR-017): `brief` answers the brief, `verdicts` the screens in
+    order (PASS when none is left), and `searches` the search requests in
+    order, each a response or an exception to raise (no search and no
+    candidate when none is left). `search_uses` records each request's
+    `max_uses`.
     """
 
     def __init__(
@@ -36,11 +86,18 @@ class FakeEvaluationProvider:
         fail_attempts: int = 0,
         canned: ModelEvaluation | None = None,
         page_steps: list[PageStep] | None = None,
+        brief: SearchBrief | None = None,
+        verdicts: list[ScreenVerdict] | None = None,
+        searches: list[SearchResponse | Exception] | None = None,
     ) -> None:
         self._remaining_failures = fail_attempts
         self._canned = canned
         self._page_steps = list(page_steps or [])
+        self._brief = brief
+        self._verdicts = list(verdicts or [])
+        self._searches = list(searches or [])
         self.calls = 0
+        self.search_uses: list[int] = []
 
     def parse[T: ContractModel](
         self, *, system: str, user: str, output_type: type[T], timeout_seconds: float | None = None
@@ -64,6 +121,14 @@ class FakeEvaluationProvider:
                     ),
                 )
             )
+        elif output_type is SearchBrief:
+            parsed = self._brief if self._brief is not None else FAKE_BRIEF
+        elif output_type is ScreenVerdict:
+            parsed = (
+                self._verdicts.pop(0)
+                if self._verdicts
+                else ScreenVerdict(verdict=ScreenDecision.PASS, reason="fake: no scripted verdict")
+            )
         else:
             raise ContractFailure(f"fake provider cannot produce {output_type.__name__}")
         return ParsedResponse(
@@ -74,6 +139,18 @@ class FakeEvaluationProvider:
             cache_read_input_tokens=0,
             cache_creation_input_tokens=0,
         )
+
+    def search(
+        self, *, system: str, messages: list[dict[str, object]], max_uses: int
+    ) -> SearchResponse:
+        self.calls += 1
+        self.search_uses.append(max_uses)
+        if self._searches:
+            scripted = self._searches.pop(0)
+            if isinstance(scripted, Exception):
+                raise scripted
+            return scripted
+        return fake_search_response()
 
     def evaluate(self, *, system: str, user: str) -> ProviderResponse:
         response = self.parse(system=system, user=user, output_type=ModelEvaluation)

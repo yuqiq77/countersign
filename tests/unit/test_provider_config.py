@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import anthropic
 import pytest
@@ -140,3 +141,44 @@ def test_sdk_transport_failure_is_unavailable_and_bounded_without_hidden_retries
     assert requests[0].extensions["timeout"] == dict.fromkeys(
         ("connect", "read", "write", "pool"), 0.25
     )
+
+
+def test_a_search_request_is_sent_once_even_when_its_read_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ticket 005 review: two read timeouts, then an answer. The SDK's own
+    retries would send the same `max_uses` three times, though the provider
+    may have searched before each timeout; the search sends one request."""
+
+    import httpx
+
+    from countersign.gateway.provider import ProviderUnavailable
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    bodies: list[dict[str, Any]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        if len(bodies) <= 2:
+            raise httpx.ReadTimeout("read timed out", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "test-model",
+                "content": [{"type": "text", "text": '{"candidates": []}'}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http_client:
+        client = anthropic.Anthropic(api_key="test-key", http_client=http_client)
+        provider = AnthropicProvider("test-model")
+        monkeypatch.setattr(provider, "_client", client)
+        with pytest.raises(ProviderUnavailable):
+            provider.search(system="s", messages=[{"role": "user", "content": "u"}], max_uses=1)
+    assert [body["tools"][0]["max_uses"] for body in bodies] == [1]

@@ -704,3 +704,138 @@ async def test_case_list_groups_cases_and_shows_the_gated_decision(
     assert listed["open"]["approval_expires_at"] is not None
     assert listed["ran-out"]["approval_expires_at"] is None
     assert listed["declined"]["approval_expires_at"] is None
+
+
+@pytest.mark.usefixtures("db")
+async def test_candidate_lists_brief_and_the_failed_screen_marker(
+    stub_temporal: _StubTemporal,
+) -> None:
+    """Ticket 005: drops and leads are listed, the brief is shown, and a case
+    admitted through a failed screen is marked in the case list."""
+
+    from countersign.contracts.enums import CandidateSource, CandidateStatus, ScreenDecision
+    from countersign.domain.discovery import VerdictInputs
+    from countersign.gateway.fake_provider import FAKE_BRIEF
+    from countersign.persistence import discovery
+
+    now = repo.utcnow()
+    inputs = VerdictInputs("abcd1234", "discovery-screen/0.1.0", "fake", "0" * 16)
+    async with _client() as client:
+        assert (await client.get("/v1/discovery/brief")).status_code == 404
+    with session_scope() as session:
+        for key, status in (("drop", CandidateStatus.UNSCREENED), ("lead", CandidateStatus.LEAD)):
+            discovery.record_sighting(
+                session,
+                posting_key=f"url:https://example.com/{key}",
+                url=f"https://example.com/{key}",
+                source=CandidateSource.SEARCH,
+                origin="site:example.com",
+                title=f"{key} role",
+                company="Acme",
+                locations=["Toronto"],
+                seen_at=now,
+                status=status,
+                note="the search's reason",
+            )
+        dropped = discovery.get_candidate(session, "url:https://example.com/drop")
+        assert dropped is not None
+        discovery.record_verdict(
+            session,
+            dropped,
+            decision=ScreenDecision.DROP,
+            reason="a sales role",
+            failed_open=False,
+            inputs=inputs,
+            usage=None,
+            at=now,
+        )
+        repo.create_case(session, case_id="watched", url="https://example.com/failed")
+        failed, _ = discovery.record_sighting(
+            session,
+            posting_key="url:https://example.com/failed",
+            url="https://example.com/failed",
+            source=CandidateSource.SEARCH,
+            origin="q",
+            title="Engineer",
+            company=None,
+            locations=[],
+            seen_at=now,
+        )
+        discovery.record_verdict(
+            session,
+            failed,
+            decision=ScreenDecision.PASS,
+            reason="screen failed: refused",
+            failed_open=True,
+            inputs=inputs,
+            usage=None,
+            at=now,
+        )
+        discovery.mark_admitted(session, "url:https://example.com/failed", "watched")
+        discovery.save_brief(
+            session,
+            profile_fingerprint="abcd1234",
+            prompt_version="discovery-brief/0.1.0",
+            route="fake",
+            brief=FAKE_BRIEF,
+            usage=None,
+        )
+
+    async with _client() as client:
+        drops = (await client.get("/v1/candidates", params={"status": "DROP"})).json()
+        leads = (await client.get("/v1/candidates", params={"status": "LEAD"})).json()
+        refused = await client.get("/v1/candidates", params={"status": "PASS"})
+        brief = (await client.get("/v1/discovery/brief")).json()
+        listed = {c["case_id"]: c for c in (await client.get("/v1/cases")).json()}
+
+    assert [(c["title"], c["reason"]) for c in drops] == [("drop role", "a sales role")]
+    assert [(c["title"], c["reason"]) for c in leads] == [("lead role", "the search's reason")]
+    assert refused.status_code == 422
+    assert brief["profile_fingerprint"] == "abcd1234"
+    assert brief["brief"]["role_families"] == FAKE_BRIEF.role_families
+    assert listed["watched"]["screen_failed"] is True
+
+
+@pytest.mark.usefixtures("db")
+async def test_a_candidate_started_again_after_a_failed_start_is_still_one_case(
+    stub_temporal: _StubTemporal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ticket 005 review: the first "Start case" commits the case and its
+    workflow start fails (500); the second click sends the candidate's same
+    key, as the UI now does, and starts the workflow of that same case."""
+
+    from countersign.contracts.enums import CandidateSource, CandidateStatus
+    from countersign.persistence import discovery
+
+    with session_scope() as session:
+        discovery.record_sighting(
+            session,
+            posting_key=f"url:{PUBLIC_URL}",
+            url=PUBLIC_URL,
+            source=CandidateSource.SEARCH,
+            origin="q",
+            title="Engineer",
+            company=None,
+            locations=[],
+            seen_at=repo.utcnow(),
+            status=CandidateStatus.LEAD,
+        )
+    started = stub_temporal.start_workflow
+    failures = [RuntimeError("temporal unreachable")]
+
+    async def flaky_start(*args: Any, **kwargs: Any) -> None:
+        if failures:
+            raise failures.pop()
+        await started(*args, **kwargs)
+
+    monkeypatch.setattr(stub_temporal, "start_workflow", flaky_start)
+    transport = ASGITransport(app=create_app(), raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        [lead] = (await client.get("/v1/candidates", params={"status": "LEAD"})).json()
+        key = {"Idempotency-Key": f"candidate-{lead['id']}"}
+        first = await client.post("/v1/cases", json={"url": lead["url"]}, headers=key)
+        second = await client.post("/v1/cases", json={"url": lead["url"]}, headers=key)
+    assert (first.status_code, second.status_code) == (500, 202)
+    assert len(stub_temporal.starts) == 1
+    with session_scope() as session:
+        assert [row.id for row in repo.list_cases(session)] == [second.json()["case_id"]]

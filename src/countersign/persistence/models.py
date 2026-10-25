@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -183,4 +184,76 @@ class IdempotencyRow(Base):
     # Hash of the canonical request payload: a replayed key must present the
     # same fingerprint, otherwise the replay is a conflict, not a repeat.
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DiscoveryCandidateRow(Base):
+    """One posting a board or the search returned, and its screen verdict (ADR-017).
+
+    `id` hashes `posting_key`, the posting's identity: the ATS key where the
+    URL parses, else the normalized URL.
+    """
+
+    __tablename__ = "discovery_candidates"
+    __table_args__ = (Index("ix_discovery_candidates_status", "status", "last_seen_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    posting_key: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source: Mapped[str] = mapped_column(String(10), nullable=False)
+    # The board, or the query whose results held the posting.
+    origin: Mapped[str] = mapped_column(String(512), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    company: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    locations: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    department: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    team: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A board posting's publication time; None for search results.
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Recording order: breaks ties between candidates first seen in one run.
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What the verdict was made from; it holds only while all are unchanged.
+    verdict_profile: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    verdict_prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verdict_route: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verdict_listing_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    screened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_passed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    usage: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    case_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("job_cases.id"), nullable=True
+    )
+
+
+class SearchBriefRow(Base):
+    """The search brief derived for one profile and brief prompt (ADR-017)."""
+
+    __tablename__ = "search_briefs"
+
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    profile_fingerprint: Mapped[str] = mapped_column(String(16), nullable=False)
+    brief: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_route: Mapped[str] = mapped_column(String(128), nullable=False)
+    usage: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DiscoverySearchRow(Base):
+    """One request of a run's search step: what it searched for (ADR-017)."""
+
+    __tablename__ = "discovery_searches"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    request_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    queries: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    searches: Mapped[int] = mapped_column(Integer, nullable=False)
+    usage: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -9,5 +9,7 @@
   "exclude_titles": ["Intern"],
   "published_within_days": 14,
   "max_new_cases_per_run": 5,
-  "max_recheck_model_calls_per_run": 30
+  "max_recheck_model_calls_per_run": 30,
+  "max_searches_per_run": 6,
+  "max_discovery_model_calls_per_run": 40
 }

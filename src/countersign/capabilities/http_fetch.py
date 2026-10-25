@@ -12,6 +12,7 @@ import ipaddress
 import socket
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.message import Message
 
@@ -225,6 +226,7 @@ def fetch_url(
     enforce_network_policy: bool = True,
     timeout_seconds: float = TIMEOUT_SECONDS,
     max_body_bytes: int | None = None,
+    refuse_hop: Callable[[str], str | None] | None = None,
 ) -> FetchResult:
     """Fetch a URL with per-hop validation pinned to the vetted address.
 
@@ -234,7 +236,10 @@ def fetch_url(
     differently on a second lookup (DNS rebinding) never redirects the
     connection. `max_body_bytes` sets the size limit for one call (an ATS
     API with no per-job endpoint, ticket 003); None is `MAX_BODY_BYTES`.
-    `transport` and `enforce_network_policy` exist for tests.
+    `refuse_hop`, when given, is asked before every hop, the first one
+    included; a reason stops the fetch there (the reader's FOLLOW passes
+    the terms list, ADR-017). `transport` and `enforce_network_policy`
+    exist for tests.
     """
 
     deadline = time.monotonic() + timeout_seconds
@@ -243,6 +248,9 @@ def fetch_url(
     client = client_for(transport)
     cookies = FetchCookies()
     for _ in range(MAX_REDIRECTS + 1):
+        refusal = refuse_hop(current) if refuse_hop is not None else None
+        if refusal is not None:
+            raise FetchPolicyError(f"not fetched: {refusal}")
         logical = httpx.URL(current)
         if enforce_network_policy:
             pinned = _vetted_address(logical)

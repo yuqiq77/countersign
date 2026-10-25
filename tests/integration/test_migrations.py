@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "human_decisions",
     "audit_events",
     "idempotency_records",
+    "discovery_candidates",
+    "search_briefs",
+    "discovery_searches",
 }
 
 

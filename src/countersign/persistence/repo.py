@@ -37,6 +37,7 @@ from countersign.domain.states import (
 from countersign.persistence.models import (
     ApprovalRequestRow,
     AuditEventRow,
+    DiscoveryCandidateRow,
     EvaluationRunRow,
     HumanDecisionRow,
     IdempotencyRow,
@@ -115,6 +116,17 @@ def append_audit(
 
 
 # --- cases -----------------------------------------------------------------
+
+
+def latest_audit_reason(session: Session, action: str) -> str | None:
+    """The reason of the most recent audit event with this action, if any."""
+
+    stmt = (
+        select(AuditEventRow.reason)
+        .where(AuditEventRow.action == action)
+        .order_by(AuditEventRow.occurred_at.desc())
+    )
+    return session.scalars(stmt).first()
 
 
 def create_case(
@@ -254,6 +266,13 @@ def case_summary(session: Session, row: JobCaseRow) -> CaseSummary:
             evaluation.evaluation if evaluation is not None else None, verification
         ),
         approval_expires_at=expires_at,
+        screen_failed=session.scalars(
+            select(DiscoveryCandidateRow.id).where(
+                DiscoveryCandidateRow.case_id == row.id,
+                DiscoveryCandidateRow.failed_open.is_(True),
+            )
+        ).first()
+        is not None,
     )
 
 

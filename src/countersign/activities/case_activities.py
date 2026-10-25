@@ -34,6 +34,7 @@ from countersign.capabilities.normalize import (
 )
 from countersign.capabilities.page_evidence import Observation
 from countersign.capabilities.render import render_url
+from countersign.capabilities.terms import refusal, restricted_host
 from countersign.contracts.enums import (
     ActorType,
     ApplyEntryKind,
@@ -346,7 +347,9 @@ def _read(
         url,
         first=first,
         authority_of=authority_of,
-        fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout),
+        # A FOLLOW never lands on a host whose terms forbid automated
+        # access, not even through a redirect (ADR-017).
+        fetch=lambda url, timeout: fetch_url(url, timeout_seconds=timeout, refuse_hop=refusal),
         render=render_url,
         provider=resolve_provider(),
         config=ReaderConfig(wall_clock_seconds=budget),
@@ -425,6 +428,11 @@ def _record(
         if first_normalized_hash is None
         else result.observations[result.body_observation].normalized_hash != first_normalized_hash
     )
+    landed = sorted({h for o in result.observations if (h := restricted_host(o.source_url))})
+    if landed and reason not in (BOARD_ABSENCE, BOARD_ABSENCE_AGAIN):
+        # The fetch followed a redirect onto such a host (ADR-017); the
+        # absence reasons stay exact, since the absence chain compares them.
+        reason = f"{reason}; reached {', '.join(landed)}, whose terms forbid automated access"
     verification = VerificationResult(
         case_id=case_id,
         status=status,

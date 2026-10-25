@@ -49,6 +49,8 @@ class CaseSummary(ContractModel):
     gated_decision: EvalDecision | None
     # When the pending approval expires; None unless a decision is awaited.
     approval_expires_at: datetime | None
+    # Admitted by the watch although its coarse screen failed (ADR-017).
+    screen_failed: bool
 
 
 class ApprovalRequestView(ContractModel):

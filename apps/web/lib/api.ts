@@ -26,6 +26,41 @@ export interface CaseSummary {
   gated_decision: string | null;
   // The pending approval's deadline; null unless a decision is awaited.
   approval_expires_at: string | null;
+  // Admitted by the watch although its coarse screen failed (ADR-017).
+  screen_failed: boolean;
+}
+
+// A posting a board or the search returned (ADR-017): listed when screened
+// out (DROP) or when it sits on a host the system does not fetch (LEAD).
+export interface CandidateView {
+  // Stable per candidate: "Start case" keys its request by it.
+  id: string;
+  key: string;
+  url: string;
+  source: "BOARD" | "SEARCH";
+  // The board, or the query whose results held the posting.
+  origin: string;
+  title: string;
+  company: string | null;
+  status: string;
+  reason: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+// What the search may know of the profile, and so what may leave through it.
+export interface BriefView {
+  profile_fingerprint: string;
+  brief: {
+    role_families: string[];
+    skills: string[];
+    regions: string[];
+    languages: string[];
+    exclude_roles: string[];
+  };
+  prompt_version: string;
+  model_route: string;
+  created_at: string;
 }
 
 export interface ApprovalRequestView {
@@ -124,6 +159,19 @@ export interface CaseDetail {
 export async function listCases(): Promise<CaseSummary[]> {
   const res = await fetch(`${API_BASE}/v1/cases`, { cache: "no-store" });
   if (!res.ok) throw new Error(`list failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listCandidates(status: "DROP" | "LEAD"): Promise<CandidateView[]> {
+  const res = await fetch(`${API_BASE}/v1/candidates?status=${status}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`candidates failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getBrief(): Promise<BriefView | null> {
+  const res = await fetch(`${API_BASE}/v1/discovery/brief`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`brief failed: ${res.status}`);
   return res.json();
 }
 

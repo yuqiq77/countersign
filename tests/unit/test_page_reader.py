@@ -997,3 +997,52 @@ def test_a_changed_page_or_an_uncheckable_reading_is_read_again(
 ) -> None:
     previous = _PREVIOUS.model_copy(update=changes)
     assert reread_unchanged(previous, _fresh().normalized_hash, _fresh(html)) is None
+
+
+LINKEDIN_URL = "https://www.linkedin.com/jobs/view/1"
+LINKEDIN_LINK_HTML = (
+    b'<html><body><h1>AI Engineer</h1><a href="https://www.linkedin.com/jobs/view/1">'
+    b"Apply on LinkedIn</a></body></html>"
+)
+
+
+def test_the_reader_neither_renders_nor_follows_on_a_restricted_host() -> None:
+    """ADR-017: no browser automation on or onto a host whose terms forbid
+    it, for pasted cases too. A shell there gets no step-0 render, a RENDER
+    there is refused, and a link onto one is not followed."""
+
+    rendered: list[str] = []
+
+    def render(url: str, body: bytes, timeout: float) -> FetchResult | None:
+        rendered.append(url)
+        return _result(url, RENDERED_HTML)
+
+    steps = [
+        PageStep(action=ReaderAction.RENDER, why="scripts", reading=_PROVISIONAL),
+        _done(_PROVISIONAL),
+    ]
+    on_listed = _run(
+        FakeEvaluationProvider(page_steps=steps),
+        first_url=LINKEDIN_URL,
+        first_html=SHELL_HTML,
+        render=render,
+    )
+    assert rendered == []
+    assert on_listed.steps[0].outcome.startswith("pre-render: render refused: linkedin.com")
+    assert on_listed.steps[1].outcome.startswith("render refused: linkedin.com")
+
+    fetched: list[str] = []
+
+    def fetch(url: str, timeout: float) -> FetchResult:
+        fetched.append(url)
+        return _result(url, ATS_HTML)
+
+    follow = [
+        PageStep(action=ReaderAction.FOLLOW, why="apply", href=LINKEDIN_URL, reading=_PROVISIONAL),
+        _done(_PROVISIONAL),
+    ]
+    onto = _run(
+        FakeEvaluationProvider(page_steps=follow), first_html=LINKEDIN_LINK_HTML, fetch=fetch
+    )
+    assert fetched == []
+    assert onto.steps[0].outcome.startswith("follow refused: linkedin.com")

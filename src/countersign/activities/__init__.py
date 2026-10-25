@@ -14,9 +14,10 @@ from countersign.activities.case_activities import (
     snapshot_source,
     verify_status,
 )
+from countersign.activities.discovery_activities import DISCOVERY_ACTIVITIES
 from countersign.activities.watch_activities import WATCH_ACTIVITIES
 
-ALL_ACTIVITIES = [*case_activities.ALL_ACTIVITIES, *WATCH_ACTIVITIES]
+ALL_ACTIVITIES = [*case_activities.ALL_ACTIVITIES, *WATCH_ACTIVITIES, *DISCOVERY_ACTIVITIES]
 
 __all__ = [
     "ALL_ACTIVITIES",

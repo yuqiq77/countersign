@@ -16,6 +16,7 @@ import httpx
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult
 from countersign.capabilities.page_evidence import Observation, observe
 from countersign.capabilities.render import RenderError
+from countersign.capabilities.terms import refusal
 from countersign.contracts.enums import (
     ApplyEntryKind,
     EvidenceKind,
@@ -515,6 +516,10 @@ def read_page(
 
     def render_current() -> str:
         current = observations[-1]
+        refused = refusal(current.source_url)
+        if refused is not None:
+            # ADR-017: no browser automation on a host whose terms forbid it.
+            return f"render refused: {refused}"
         if current.source_url in rendered_urls:
             return "render already attempted"
         rendered_urls.add(current.source_url)
@@ -586,6 +591,9 @@ def read_page(
                 outcome = "href not on page"
             elif follows >= cfg.max_follows:
                 outcome = "follow budget exhausted"
+            elif (refused := refusal(href)) is not None:
+                # Redirects onto a listed host are refused by the fetch itself.
+                outcome = f"follow refused: {refused}"
             else:
                 follows += 1
                 response = fetch(href, _remaining(deadline))

@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { createCase, listCases, type CaseGroup, type CaseSummary } from "../lib/api";
+import {
+  createCase,
+  getBrief,
+  listCandidates,
+  listCases,
+  type BriefView,
+  type CandidateView,
+  type CaseGroup,
+  type CaseSummary,
+} from "../lib/api";
 
 // The server derives each case's group from stored records; a view only
 // chooses which groups it shows.
@@ -14,6 +23,14 @@ const VIEWS: { key: string; label: string; groups: CaseGroup[] }[] = [
   { key: "expired", label: "Expired without decision", groups: ["EXPIRED"] },
   { key: "closed", label: "Closed at source", groups: ["SOURCE_CLOSED"] },
   { key: "stopped", label: "Stopped", groups: ["STOPPED"] },
+];
+
+// Discovery (ADR-017): what the screen dropped, what the system does not
+// fetch on its own, and what the search may know of the profile.
+const DISCOVERY_VIEWS: { key: string; label: string; status?: "DROP" | "LEAD" }[] = [
+  { key: "screened", label: "Screened out", status: "DROP" },
+  { key: "leads", label: "Leads", status: "LEAD" },
+  { key: "brief", label: "Search brief" },
 ];
 
 // The evaluator's decision bands in the order the policy lists them, best
@@ -104,6 +121,14 @@ function CaseTable({
                 >
                   {c.title ?? c.url}
                 </Link>
+                {c.screen_failed ? (
+                  <span
+                    title="Admitted although its coarse screen failed"
+                    className="ml-2 rounded border border-amber-700 px-1.5 py-0.5 text-[10px] text-amber-400"
+                  >
+                    screen failed
+                  </span>
+                ) : null}
               </td>
               {showState ? (
                 <td className="py-3 pr-4">
@@ -139,10 +164,104 @@ function CaseTable({
   );
 }
 
+function CandidateTable({
+  candidates,
+  started,
+  onStart,
+  empty,
+}: {
+  candidates: CandidateView[];
+  started: Set<string>;
+  onStart: (c: CandidateView) => void;
+  empty: string;
+}) {
+  return (
+    <table className="w-full text-left text-sm">
+      <thead className="text-neutral-400">
+        <tr>
+          <th className="pb-2 pr-4 font-medium">Title</th>
+          <th className="pb-2 pr-4 font-medium">Company</th>
+          <th className="pb-2 pr-4 font-medium">Found by</th>
+          <th className="pb-2 pr-4 font-medium">Reason</th>
+          <th className="pb-2 font-medium" />
+        </tr>
+      </thead>
+      <tbody>
+        {candidates.map((c) => (
+          <tr key={c.key} className="border-t border-neutral-800 align-top">
+            <td className="py-3 pr-4">
+              <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">
+                {c.title}
+              </a>
+            </td>
+            <td className="py-3 pr-4 text-neutral-300">{c.company ?? "—"}</td>
+            <td className="py-3 pr-4 text-neutral-500">
+              {c.source === "BOARD" ? c.origin : `search: ${c.origin || "—"}`}
+            </td>
+            <td className="py-3 pr-4 text-neutral-400">{c.reason ?? "—"}</td>
+            <td className="py-3 text-right">
+              <button
+                type="button"
+                disabled={started.has(c.url)}
+                onClick={() => onStart(c)}
+                className="whitespace-nowrap rounded-lg border border-neutral-700 px-3 py-1 text-xs text-neutral-300 hover:border-emerald-500 disabled:opacity-50"
+              >
+                {started.has(c.url) ? "Started" : "Start case"}
+              </button>
+            </td>
+          </tr>
+        ))}
+        {candidates.length === 0 ? (
+          <tr>
+            <td colSpan={5} className="py-8 text-center text-neutral-500">
+              {empty}
+            </td>
+          </tr>
+        ) : null}
+      </tbody>
+    </table>
+  );
+}
+
+function BriefPanel({ brief }: { brief: BriefView | null }) {
+  if (brief === null) {
+    return <p className="py-8 text-center text-sm text-neutral-500">No brief derived yet.</p>;
+  }
+  const lists: [string, string[]][] = [
+    ["Role families", brief.brief.role_families],
+    ["Skills", brief.brief.skills],
+    ["Regions", brief.brief.regions],
+    ["Languages", brief.brief.languages],
+    ["Roles to exclude", brief.brief.exclude_roles],
+  ];
+  return (
+    <div className="text-sm">
+      <p className="mb-4 text-neutral-400">
+        The search sees only this brief, derived from your profile; its queries cannot carry
+        anything else. Derived {new Date(brief.created_at).toLocaleString()} by{" "}
+        {brief.model_route} ({brief.prompt_version}), profile {brief.profile_fingerprint}.
+      </p>
+      <dl className="grid grid-cols-[10rem_1fr] gap-y-2">
+        {lists.map(([label, entries]) => (
+          <div key={label} className="contents">
+            <dt className="text-neutral-400">{label}</dt>
+            <dd className="text-neutral-200">{entries.length ? entries.join(", ") : "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState("active");
+  const [candidates, setCandidates] = useState<CandidateView[] | null>(null);
+  const [brief, setBrief] = useState<BriefView | null | undefined>(undefined);
+  const [started, setStarted] = useState<Set<string>>(new Set());
+  // The refresh timer reads the current view through this, not a stale closure.
+  const viewRef = useRef("active");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,28 +274,54 @@ export default function HomePage() {
     try {
       setCases(await listCases());
       setLoaded(true);
+      const discovery = DISCOVERY_VIEWS.find((v) => v.key === viewRef.current);
+      if (discovery?.status) setCandidates(await listCandidates(discovery.status));
+      else if (discovery) setBrief(await getBrief());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
+  // The chosen view lives in the URL, so returning from a case keeps it. It
+  // is read before the first refresh, which then loads that view's data.
   useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("view");
+    const match = [...VIEWS, ...DISCOVERY_VIEWS].find((v) => v.key === wanted);
+    if (match) {
+      setView(match.key);
+      viewRef.current = match.key;
+    }
     void refresh();
     const timer = setInterval(() => void refresh(), 4000);
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // The chosen view lives in the URL, so returning from a case keeps it.
-  useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("view");
-    const match = VIEWS.find((v) => v.key === wanted);
-    if (match) setView(match.key);
-  }, []);
-
   function choose(key: string) {
     setView(key);
+    viewRef.current = key;
+    setCandidates(null);
     window.history.replaceState(null, "", key === "active" ? "/" : `/?view=${key}`);
+    void refresh();
+  }
+
+  async function startCase(candidate: CandidateView) {
+    // Disabled while the request is in flight. The key belongs to the
+    // candidate, not to the click: a retry after an error, a lost response
+    // or a reload replays it, and the API starts the workflow a failed first
+    // request left unstarted instead of creating a second case.
+    setStarted((prior) => new Set(prior).add(candidate.url));
+    try {
+      await createCase(candidate.url, `candidate-${candidate.id}`);
+      await refresh();
+    } catch (e) {
+      setStarted((prior) => {
+        const next = new Set(prior);
+        next.delete(candidate.url);
+        return next;
+      });
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function onSubmit(event: React.FormEvent) {
@@ -201,6 +346,7 @@ export default function HomePage() {
   const inGroups = (groups: CaseGroup[]) =>
     cases.filter((c) => groups.includes(c.group)).sort(byBand);
   const current = VIEWS.find((v) => v.key === view) ?? VIEWS[0];
+  const discoveryView = DISCOVERY_VIEWS.find((v) => v.key === view);
   const awaiting = inGroups(["AWAITING_DECISION"]);
   const inProgress = inGroups(["IN_PROGRESS"]);
 
@@ -241,10 +387,10 @@ export default function HomePage() {
           <button
             key={v.key}
             type="button"
-            aria-pressed={v.key === current.key}
+            aria-pressed={!discoveryView && v.key === current.key}
             onClick={() => choose(v.key)}
             className={`rounded-full border px-3 py-1 ${
-              v.key === current.key
+              !discoveryView && v.key === current.key
                 ? "border-emerald-500 text-emerald-300"
                 : "border-neutral-700 text-neutral-400 hover:text-neutral-200"
             }`}
@@ -255,9 +401,45 @@ export default function HomePage() {
             </span>
           </button>
         ))}
+        <span className="mx-1 self-center text-neutral-700">|</span>
+        {DISCOVERY_VIEWS.map((v) => (
+          <button
+            key={v.key}
+            type="button"
+            aria-pressed={v.key === discoveryView?.key}
+            onClick={() => choose(v.key)}
+            className={`rounded-full border px-3 py-1 ${
+              v.key === discoveryView?.key
+                ? "border-emerald-500 text-emerald-300"
+                : "border-neutral-700 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {v.label}
+            {v.key === discoveryView?.key && v.status && candidates !== null ? (
+              <span className="ml-1.5 text-neutral-500">{candidates.length}</span>
+            ) : null}
+          </button>
+        ))}
       </nav>
 
-      {!loaded ? null : cases.length === 0 ? (
+      {discoveryView ? (
+        discoveryView.status ? (
+          candidates === null ? null : (
+            <CandidateTable
+              candidates={candidates}
+              started={started}
+              onStart={(c) => void startCase(c)}
+              empty={
+                discoveryView.status === "DROP"
+                  ? "Nothing screened out in the last 30 days."
+                  : "No leads in the last 30 days."
+              }
+            />
+          )
+        ) : brief === undefined ? null : (
+          <BriefPanel brief={brief} />
+        )
+      ) : !loaded ? null : cases.length === 0 ? (
         <p className="py-8 text-center text-sm text-neutral-500">No cases yet.</p>
       ) : current.key === "active" ? (
         <>

@@ -8,7 +8,8 @@ heals on retry without a second workflow for a case that already ran.
 """
 
 import hashlib
-from typing import Annotated
+from datetime import timedelta
+from typing import Annotated, Literal
 
 import anyio.to_thread
 from fastapi import APIRouter, Header, HTTPException
@@ -25,10 +26,16 @@ from countersign.contracts.cases import (
     CreateCaseRequest,
     CreateCaseResponse,
 )
-from countersign.contracts.enums import ApprovalDecision, ApprovalRequestStatus, CaseState
+from countersign.contracts.discovery import BriefView, CandidateView
+from countersign.contracts.enums import (
+    ApprovalDecision,
+    ApprovalRequestStatus,
+    CandidateStatus,
+    CaseState,
+)
 from countersign.contracts.workflow_io import CaseWorkflowInput, DecisionSignal
 from countersign.domain.gates import shown_decision
-from countersign.persistence import repo
+from countersign.persistence import discovery, repo
 from countersign.persistence.db import session_scope
 from countersign.runtime import TASK_QUEUE, WORKFLOW_NAME, connect_client, workflow_id_for
 
@@ -120,6 +127,31 @@ async def create_case(
 def list_cases() -> list[CaseSummary]:
     with session_scope() as session:
         return [repo.case_summary(session, row) for row in repo.list_cases(session)]
+
+
+# How far back the candidate lists reach (ticket 005).
+_CANDIDATE_HORIZON = timedelta(days=30)
+
+
+@router.get("/candidates", response_model=list[CandidateView])
+def list_candidates(status: Literal["DROP", "LEAD"]) -> list[CandidateView]:
+    """Screened-out candidates or leads (ADR-017), last seen within 30 days."""
+
+    with session_scope() as session:
+        return discovery.list_candidates(
+            session, CandidateStatus(status), repo.utcnow() - _CANDIDATE_HORIZON
+        )
+
+
+@router.get("/discovery/brief", response_model=BriefView)
+def get_brief() -> BriefView:
+    """The search brief derived most recently: what the search may send out."""
+
+    with session_scope() as session:
+        brief = discovery.latest_brief(session)
+    if brief is None:
+        raise HTTPException(status_code=404, detail="no brief derived yet")
+    return brief
 
 
 @router.get("/cases/{case_id}", response_model=CaseDetail)

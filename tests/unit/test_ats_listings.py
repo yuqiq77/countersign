@@ -64,7 +64,9 @@ def test_an_ashby_board_lists_each_posting_with_its_location_texts() -> None:
                 },
                 "jobUrl": f"https://jobs.ashbyhq.com/acme/{ASHBY_JOB}",
                 "applyUrl": f"https://jobs.ashbyhq.com/acme/{ASHBY_JOB}/application",
-                "descriptionPlain": "Build durable systems.",
+                "descriptionPlain": "  Build durable systems.  ",
+                "department": "Engineering",
+                "team": "",
             },
             {"id": "other", "title": "Recruiter", "publishedAt": "2026-10-01T09:00:00Z"},
         ],
@@ -81,6 +83,10 @@ def test_an_ashby_board_lists_each_posting_with_its_location_texts() -> None:
                 title="Platform Engineer",
                 locations=("Remote - European Union", "Spain", "European Union"),
                 published_at=datetime(2024, 3, 4, 14, 29, 8, 532000, tzinfo=UTC),
+                # Listing facts for the coarse screen (ADR-017); blanks are absent.
+                department="Engineering",
+                team=None,
+                excerpt="Build durable systems.",
             ),
             ListedPosting(
                 url="https://jobs.ashbyhq.com/acme/other",

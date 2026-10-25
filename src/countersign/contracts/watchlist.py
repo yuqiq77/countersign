@@ -1,9 +1,9 @@
-"""Contract for the operator's watchlist (ticket 004, ADR-016).
+"""Contract for the operator's watchlist (ticket 004, ADR-016, ADR-017).
 
 The watchlist is private policy loaded by path (`policy/watchlist.py`);
-this module only shapes it. Filters are structured facts only: location
-texts a posting must name and title substrings that drop it. Relevance
-stays the evaluator's judgment.
+this module only shapes it. Its structured filters are location texts a
+posting must name and title substrings that drop it; relevance is judged
+by the coarse screen (ADR-017) and the evaluator.
 """
 
 from typing import Annotated, Literal
@@ -37,10 +37,19 @@ class Watchlist(ContractModel):
 
     version: str = Field(min_length=1, max_length=64)
     schedule: WatchSchedule
-    boards: list[WatchBoard] = Field(min_length=1)
-    # Case-insensitive substrings of the posting's location texts.
+    # May be empty when the search is on (`policy/watchlist.py` checks that
+    # one source exists).
+    boards: list[WatchBoard] = Field(default_factory=lambda: [])
+    # Case-insensitive substrings of the posting's location texts; also the
+    # search's regions (ADR-017).
     locations: list[_Substring] = Field(min_length=1)
     exclude_titles: list[_Substring] = Field(default_factory=lambda: [])
     published_within_days: int = Field(default=14, ge=1)
+    # New cases per run, board and search together (ADR-017 decision 7).
     max_new_cases_per_run: int = Field(ge=0)
     max_recheck_model_calls_per_run: int = Field(ge=0)
+    # Searches per run across every request of the search step; 0 turns the
+    # search off.
+    max_searches_per_run: int = Field(ge=0)
+    # One budget for the brief, the search's requests and both screens.
+    max_discovery_model_calls_per_run: int = Field(ge=0)

@@ -38,6 +38,8 @@ API_HOST = "api.ashbyhq.com"
 # A board of 67 postings was 2.0 MB. A larger board is unavailable, never
 # a truncated parse.
 MAX_BOARD_BYTES = 8_000_000
+# The head of a posting's plain description the coarse screen reads (ADR-017).
+EXCERPT_CHARS = 1_500
 ADAPTER_NAME = "ats-adapter/ashby"
 ADAPTER_VERSION = "0.1.0"
 # Stands where a reader's prompt version would on the reading it makes.
@@ -98,6 +100,9 @@ class _Listed(BaseModel):
     location: str | None = None
     secondary: list[_Secondary] | None = Field(default=None, alias="secondaryLocations")
     address: _Address | None = None
+    department: str | None = None
+    team: str | None = None
+    description_plain: str | None = Field(default=None, alias="descriptionPlain")
 
 
 class _Listing(BaseModel):
@@ -193,6 +198,9 @@ def list_board(board: str, *, fetch: Callable[[str], FetchResult]) -> BoardListi
             title=job.title,
             locations=_location_texts(job),
             published_at=job.published_at,
+            department=job.department or None,
+            team=job.team or None,
+            excerpt=(job.description_plain or "").strip()[:EXCERPT_CHARS] or None,
         )
         for job in jobs
     ]

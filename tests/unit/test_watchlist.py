@@ -1,5 +1,6 @@
-"""Watchlist policy (ticket 004): loading, the structured filter, the Schedule
-it describes, and the budget units its limits are counted in."""
+"""Watchlist policy (ticket 004, ADR-017): loading, the sources it must name,
+the structured filter, the Schedule it describes, and the budget units its
+limits are counted in."""
 
 import json
 from datetime import timedelta
@@ -51,11 +52,19 @@ def test_unset_or_blank_path_means_no_watch(monkeypatch: pytest.MonkeyPatch) -> 
         _variant(locations=[""]),
         _variant(exclude_titles=[""]),
         _variant(max_recheck_model_calls_per_run=-1),
+        _variant(max_searches_per_run=-1),
+        _variant(boards=[], max_searches_per_run=0),
+        _variant(max_discovery_model_calls_per_run=1),
     ],
 )
 def test_a_malformed_watchlist_fails_naming_its_source(text: str) -> None:
     with pytest.raises(ValueError, match="operator-watchlist"):
         parse_watchlist(text, source="operator-watchlist")
+
+
+def test_a_search_only_watchlist_is_allowed() -> None:
+    watchlist = parse_watchlist(_variant(boards=[], max_searches_per_run=3)).watchlist
+    assert (watchlist.boards, watchlist.max_searches_per_run) == ([], 3)
 
 
 def test_a_missing_file_fails_at_load(tmp_path: Path) -> None:

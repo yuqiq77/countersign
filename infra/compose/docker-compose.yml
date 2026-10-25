@@ -83,6 +83,8 @@ services:
       COUNTERSIGN_TEMPORAL_ADDRESS: temporal:7233
       COUNTERSIGN_MODEL_PROVIDER: ${COUNTERSIGN_MODEL_PROVIDER:-fake}
       COUNTERSIGN_MODEL_ID: ${COUNTERSIGN_MODEL_ID:-claude-opus-5}
+      # Brief, search and screen (ADR-017); blank means claude-haiku-5-5.
+      COUNTERSIGN_DISCOVERY_MODEL_ID: ${COUNTERSIGN_DISCOVERY_MODEL_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # A blank base URL is treated as unset by the gateway.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}

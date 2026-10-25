@@ -1,9 +1,10 @@
 """Provider protocol and errors for the thin model gateway."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from countersign.contracts.base import ContractModel
+from countersign.contracts.discovery import SearchCandidates
 from countersign.contracts.evaluation import ModelEvaluation
 
 
@@ -55,6 +56,29 @@ class ParsedResponse[T: ContractModel]:
     request_id: str | None = None
 
 
+@dataclass(frozen=True)
+class SearchResponse:
+    """One request of the search step (ADR-017) with what code checks.
+
+    `parsed` is None while the model is paused (`stop_reason` "pause_turn");
+    `content` then carries the turn so far, opaque, for the continuation.
+    `results` pairs every result URL with the query that returned it.
+    """
+
+    parsed: SearchCandidates | None
+    stop_reason: str | None
+    queries: list[str]
+    results: list[tuple[str, str]]
+    searches: int
+    model_id: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    request_id: str | None = None
+    content: list[object] = field(default_factory=lambda: [])
+
+
 class EvaluationProvider(Protocol):
     """A model backend able to produce a typed evaluation."""
 
@@ -73,5 +97,15 @@ class StructuredProvider(Protocol):
         ...
 
 
-class ModelProvider(EvaluationProvider, StructuredProvider, Protocol):
-    """What `resolve_provider` returns: both the evaluation and the generic route."""
+class SearchProvider(Protocol):
+    """A model backend able to run one request of the web search step."""
+
+    def search(
+        self, *, system: str, messages: list[dict[str, object]], max_uses: int
+    ) -> SearchResponse:
+        """Search with at most `max_uses` searches; 0 means no search at all."""
+        ...
+
+
+class ModelProvider(EvaluationProvider, StructuredProvider, SearchProvider, Protocol):
+    """What the routes return: evaluation, the generic structured call and search."""

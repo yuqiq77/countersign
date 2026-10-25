@@ -16,6 +16,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from countersign.contracts.watchlist import Watchlist
+from countersign.domain.watch import SCREEN_MODEL_CALLS
 from countersign.env import optional_env
 
 WATCHLIST_PATH_VAR = "COUNTERSIGN_WATCHLIST_PATH"
@@ -38,6 +39,15 @@ def parse_watchlist(text: str, *, source: str = "<text>") -> WatchPolicy:
         watchlist = Watchlist.model_validate_json(stripped)
     except ValidationError as exc:
         raise ValueError(f"watchlist at {source!r}: {exc}") from exc
+    if not watchlist.boards and watchlist.max_searches_per_run == 0:
+        raise ValueError(f"watchlist at {source!r}: no source; list a board or allow searches")
+    if watchlist.max_discovery_model_calls_per_run < SCREEN_MODEL_CALLS:
+        # Every candidate is screened before intake (ADR-017), so a budget
+        # below one screen would admit nothing.
+        raise ValueError(
+            f"watchlist at {source!r}: max_discovery_model_calls_per_run must cover "
+            f"one screen ({SCREEN_MODEL_CALLS} calls)"
+        )
     return WatchPolicy(
         watchlist=watchlist,
         # The stripped text, as for the profile and the official hosts.
