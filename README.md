@@ -98,6 +98,11 @@ Implemented (Slice 1 core plus parts of Slice 2):
   admits new postings from watched Ashby and Greenhouse boards into the same
   pipeline
   ([ADR-016](docs/adr/016-scheduled-watch.md), [ticket 004](docs/tickets/004-scheduled-watch.md)).
+- **Profile-driven discovery.** Implemented and tested, not yet run live: a
+  web search that sees only a brief derived from the operator profile, and a
+  small-model screen of search and board candidates before intake; dropped
+  candidates and leads on hosts the system does not fetch are listed
+  ([ADR-017](docs/adr/017-profile-driven-discovery.md), [ticket 005](docs/tickets/005-profile-driven-discovery.md)).
 - **Human approval.** The system's APPLY_NOW framing needs an official OPEN;
   approving a posting without one is recorded as the reviewer's own
   verification ([ADR-013](docs/adr/013-human-attestation-for-unverified-postings.md)).
@@ -120,8 +125,7 @@ Implemented (Slice 1 core plus parts of Slice 2):
 
 Not implemented yet (Slice 2+):
 
-- profile-driven discovery ([ADR-017](docs/adr/017-profile-driven-discovery.md)),
-  further ATS adapters (Lever, SmartRecruiters), rechecks of approved
+- further ATS adapters (Lever, SmartRecruiters), rechecks of approved
   cases, capability registry policy enforcement, prompt/policy version
   registry;
 - authorization, failure inbox UI, OTel traces and cost dashboard;

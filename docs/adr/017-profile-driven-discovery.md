@@ -1,6 +1,7 @@
 # ADR-017: Discovery inside the system — a profile-driven search and a coarse screen
 
-- Status: accepted (2026-10-22)
+- Status: accepted (2026-10-22); decisions 5 and 7 aligned with
+  [ticket 005](../tickets/005-profile-driven-discovery.md) the same day
 - Date: 2026-10-19
 - Supersedes in part: [ADR-016](016-scheduled-watch.md), decision 2's "the
   watch never judges relevance" and its rejected alternative "LLM triage of
@@ -103,15 +104,20 @@ model-chosen retrieval is for (ADR-011).
    plus these records is the one inventory. This is a schema change, so it
    comes with a migration after the baseline.
 
-5. **Terms of service bound automated intake.** Automated intake never
-   fetches a host whose terms forbid automated access; LinkedIn is the
+5. **Terms of service bound automated intake.** No case starts
+   automatically on a host whose terms forbid automated access, and the
+   reader never renders or follows on or onto one; LinkedIn is the
    standing case (v4 §5). A search result on such a host is recorded as a
    lead, not admitted, and the search step is told to return the company's
    or the ATS's own posting URL instead. LinkedIn offers no public API for
    reading or searching jobs (its job APIs are partner programs for
    publishing them), and MCP servers for it drive a logged-in session or
    unofficial endpoints, which its user agreement prohibits; neither is an
-   input here. Pasting a URL by hand is unchanged.
+   input here. A case whose URL redirects onto such a host still follows
+   those redirects in its own fetches (snapshot, verification, rechecks
+   and their retries), read-only and without login, and its verification
+   names the host. Pasted URLs are taken as before, under the same reader
+   rule.
 
 6. **Intake as for the watch, in an order each source can date.** PASS
    candidates that are not known become cases, with ids derived from the
@@ -155,10 +161,10 @@ model-chosen retrieval is for (ADR-011).
    operator sets first values for the live trial and revises them from
    recorded usage. Candidates beyond a budget wait for the next run.
 
-   Routes are configuration: the brief, the screen and the search run on a
-   Haiku-class route, the search with the provider's dynamic result
-   filtering on; a Sonnet-class route is the fallback for the search if
-   result quality calls for it.
+   Routes are configuration: the brief, the screen and the search share
+   one Haiku-class route, the search with the provider's dynamic result
+   filtering on; if Haiku's filtering or task quality falls short, the
+   route as a whole moves to a Sonnet-class model.
 
 8. **The external agent is retired after a side-by-side.** Both run for two
    weeks. The external agent's reports for that period are compared once,
