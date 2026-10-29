@@ -505,3 +505,173 @@ Still unverified: closure by board absence on two consecutive rechecks,
 republication (including whether Ashby moves `publishedAt`), missed-run
 catch-up, overlap skipping and the Greenhouse live path. The two
 reproduced review findings remain open.
+
+### Live review — 2026-10-26
+
+Read-only SQLAlchemy queries in the deployed worker against the live
+`countersign` PostgreSQL database (`127.0.0.1:5435`), Temporal Schedule
+inspection and the public Ashby listing confirmed:
+
+- Nine `watch.run` audits: the four initial manual triggers and five
+  calendar ticks. The five calendar runs created no new cases and
+  recorded 38 rechecks, 32 without a model call, with seven reader calls
+  and zero recheck failures. The board read succeeded on every run.
+- The 14 backfilled cases are now 12 REJECTED by human decisions and two
+  CLOSED_OR_STALE through source closure. Low subsequent recheck counts
+  reflect the processed approval queue. All posting-derived case ids
+  remain unique.
+- On 2026-10-21 a previously source-closed Ashby posting was recorded as
+  `case.reappeared`. Its current `publishedAt` is later than both its
+  original timestamp retained at bootstrap and its closure verification.
+  The posting id is unchanged. Subsequent runs wrote no second
+  reappearance event, and the case stayed CLOSED_OR_STALE. This supplies
+  the previously missing live republication evidence and confirms that
+  `publishedAt` can advance on republication for this observed posting.
+- The Schedule is active, with no running action, nine actions started,
+  no actions missed beyond the catch-up window and none skipped by
+  overlap. The configured local hour was preserved across the daylight
+  saving transition. Those zero counters do not exercise catch-up or
+  overlap behavior. Only the latest workflow execution remains in
+  Temporal visibility; it is COMPLETED. Earlier evidence is the stored
+  run audits and Schedule action history.
+
+The inspection submitted no decisions, triggered no workflow, invoked
+no model and made no deployment or schema change. The deployment still
+uses migration 0001 and ticket 004's watch contract; the current working
+branch contains ticket 005 and was not deployed for this review.
+Full query results, timestamp comparisons and assertion results are in
+`data/operator/watch-review-20261026/`, outside the tracked tree. CI was
+not rerun for these read-only deployment checks.
+
+The two-week window still ends no earlier than 2026-10-28. The Greenhouse
+live path, closure by board absence, catch-up/overlap behavior and the
+two review findings remain outstanding. Adding sources is being
+considered separately; this review does not mark the ticket complete.
+
+### Owner-approved source expansion — 2026-10-26
+
+The owner requested boards with postings published inside the existing
+window, approved one additional Ashby board and one Greenhouse board,
+and authorized one manual run. The regular lookback, region filters,
+title exclusions, budgets and calendar were retained. No older postings
+were backfilled. The Greenhouse job's `first_published`, separately
+checked from `updated_at`, was inside the window; the admitted Ashby
+postings' `publishedAt` values were inside it too. Ashby's field is its
+latest publication timestamp, not independent proof of first publication.
+
+The new private file was validated using the deployed ticket 004
+contract before installation. The existing worker's
+`sync_watch_schedule` updated the Schedule and its policy identity;
+`ScheduleHandle.trigger()` started one manual run. No image was rebuilt
+and no migration or ticket 005 code was deployed.
+
+Observed on the same live `countersign` database:
+
+- All three boards returned HTTP 200. The run saw 76 postings, counted
+  50 filtered, 12 known and 10 outside the window, and created four cases
+  within the existing admission budget. It rechecked one existing case
+  without a model call; no recheck failed.
+- All four new cases had actor `watch`, distinct posting URLs, one real
+  evaluation and a pending approval. Three Ashby postings verified OPEN
+  through OFFICIAL_ATS without reader model calls. The evaluations were
+  two SKIP, one NETWORK and one WAIT.
+- The Greenhouse hosted URL redirected to a company job-description
+  page. The reader rendered it but neither observation exposed a job
+  body or apply control. It recorded no status evidence, classified the
+  posting UNVERIFIED and evaluated WAIT. The stored title is the generic
+  company-page title. Discovery and intake are observed end to end;
+  successful retrieval and assessment of that job's contents are not.
+  No authority mapping or navigation rule was widened to change this
+  result. The paid replay diagnostic was not run and no prompt changed;
+  this diagnosis uses the stored observations and reader step reasons.
+- Existing approval evidence pins and human decisions were unchanged.
+  The deployment schema remains 0001. The Schedule is active with ten
+  actions started, no current action and its next configured calendar
+  tick on 2026-10-28.
+
+Verification commands:
+`.venv/bin/python data/operator/watch-review-20261026/check_expansion.py`
+queried the live database in a read-only transaction and inspected the
+real Schedule; `.venv/bin/python
+data/operator/watch-review-20261026/assert_expansion.py` passed assertions
+against the saved evidence, including the unchanged window and budgets,
+the four approvals, official OPEN versus UNVERIFIED outcomes, publication
+dates and single-trigger count. Policy backups and evidence remain
+gitignored. CI was not rerun for private configuration and documentation
+changes; no test database was created. The two-week duration, the
+unobserved boundary paths and the two earlier review findings are not
+closed by this source expansion.
+
+### Two-week live acceptance review — 2026-10-29
+
+**The two-week core operating criterion is met.** Inspection took place
+more than 14 days after Schedule creation on 2026-10-14. All six expected
+calendar ticks through 2026-10-28 have complete `watch.run` audits. Five
+manual triggers (the initial four plus the source-expansion run) bring
+the total to eleven. Each board read recorded HTTP 200, with zero
+reported recheck failures and admission/recheck charges within the
+configured per-run budgets. The configured local hour held across the
+daylight saving transition.
+
+Across the observed period:
+
+- **20 distinct watched postings became cases.** Each has one evaluation
+  and one approval request; all passed through PENDING_APPROVAL. Current
+  watch-created states are 12 human-rejected, two source-closed and six
+  pending. Posting identities are unique and each run's creation count
+  matches its creation audits.
+- **105 rechecks, 88 without a model call**, with 19 reader calls charged
+  across the other rechecks. The watch records keep these separate from
+  new cases' worst-case admission charge; that reserved charge is not
+  actual provider usage. Eighteen approval pins retained at the previous
+  review still reference the same verification and evaluation. Neither
+  of the two approved cases in the deployment was rechecked after its
+  approval decision. This absence of observed corruption does not
+  resolve the known concurrent-write finding.
+- **Two source takedowns closed pending cases**, expired their approvals
+  with the recorded source-closure reason and kept them CLOSED_OR_STALE.
+  **One republication** was recorded once without reopening the case or
+  admitting a duplicate; the publication-timestamp evidence is recorded
+  in the 2026-10-26 review above.
+- **The 2026-10-28 calendar tick discovered two new postings** and brought
+  both to PENDING_APPROVAL with official OPEN verifications. It saw 79
+  postings across the three configured boards, counted 16 known, created
+  two, and rechecked five cases, four without a model call (two reader
+  calls, no failures). Previously admitted candidates were not recreated.
+- **The Greenhouse limitation persists.** Its 2026-10-28 recheck still
+  found no accepting apply entry; the case remains UNVERIFIED with WAIT
+  and a generic company-page title. The observed Greenhouse path proves
+  discovery, intake and conservative handling of missing evidence, but
+  not retrieval or assessment of that posting's actual job body. That
+  board joined on 2026-10-26, so it does not have two weeks of source
+  coverage.
+
+The Schedule is active with eleven recorded actions, no action running,
+no actions missed beyond the catch-up window and none skipped for
+overlap. Those zero counters do not exercise the respective policies.
+Temporal visibility and direct workflow describe no longer retain the
+old watch executions, including the 2026-10-28 execution at review time.
+The conclusions above rely on Schedule action history and the business
+audit/artifact records; this review does not claim retained COMPLETED
+histories for every run.
+
+Verification used `docker compose --env-file .env -f
+infra/compose/docker-compose.yml exec -T worker python -` to query the
+live **`countersign` database at `127.0.0.1:5435`** under
+`SET TRANSACTION READ ONLY`, and the Temporal SDK to inspect the existing
+Schedule and retained executions. The resulting records are in
+`data/operator/watch-acceptance-20261029/`. Running
+`.venv/bin/python data/operator/watch-acceptance-20261029/assert_acceptance.py`
+passed checks of duration, expected ticks, audit counts, budgets,
+dedupe, approvals, evidence pins, closures, reappearance and the latest
+tick. No workflow was triggered, no model was called, no deployment or
+schema changed, and no test database was created. CI was not rerun;
+the earlier automated verification remains the evidence for those
+tests, rather than a claim about a new run on the ticket 005 branch.
+
+This completes the observation period and its core live acceptance,
+not every branch of behavior or the entire ticket. The reproduced
+concurrent recheck/decision write and secondary-address extraction
+findings remain open. Concurrent decision/closure, board-absence closure,
+missed-run catch-up and overlap skipping were not observed live. No
+slice or release claim is changed and the ticket is not marked closed.

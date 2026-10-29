@@ -7,47 +7,54 @@ details stay in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-10-25 |
-| Branch | `main`, tracking `origin/main` |
+| As of | 2026-10-29 |
+| Branch | `main`, tracking `origin/main`; the deployment still runs the ticket 004 worker |
 | CI | GitHub Python 3.12.15: 345 tests passed, 3 browser tests skipped (Chromium not configured); static checks and web typecheck/build passed |
 | Slice | Slice 1 and its core live paths verified; release boundary `v0.1.0` |
-| Focus | Ticket 004 two-week live acceptance; ticket 005 (profile-driven discovery) reviewed on its branch, prompt wording pending |
+| Focus | Ticket 004 two-week core live acceptance verified, with review findings and source-reading limits outstanding; ticket 005 merged, prompt wording pending before deployment |
 | Deployed | Ticket 004 watch and ticket 003 final ATS-host line confirmed in the worker; subsequent stored-payload refactor and the grouped case list not rebuilt |
 | In force | `page-reader/0.5.0`, `evaluator/0.3.2` |
 
 ## Next
 
-1. Complete ticket 004's two-week live acceptance, started 2026-10-14
-   (earliest completion 2026-10-28), and address its two review findings.
-   The private watchlist is active. Initial backfill, dedupe, rechecks
-   and Schedule create/update/pause/resume passed on the deployment; the
-   scheduled ticks of 2026-10-16 and 2026-10-19 ran, and the second
-   closed two pending cases whose postings had been taken down. Still to
-   observe: republication (including whether Ashby moves `publishedAt`),
-   closure by board absence, missed-run catch-up and overlap skipping.
-   Evidence is in the ticket.
+1. Address ticket 004's two review findings and retain its source-reading
+   limits. Its two-week core live acceptance was verified on 2026-10-29:
+   six calendar ticks, five manual triggers, 20 distinct cases reaching
+   approval, 105 rechecks (88 without model calls), two source closures
+   and one republication, with no recorded recheck failures or budget
+   overrun. The 2026-10-28 tick admitted two new postings without a
+   manual trigger. The private watchlist remains active. The Greenhouse
+   company embed still supplies no job body and stays UNVERIFIED / WAIT.
+   Concurrent decision/closure, board-absence closure, catch-up and
+   overlap paths have no live exercise; available evidence and its
+   retention limits are in the ticket. The ticket is not marked closed.
 2. Web dependencies: Next.js 16.4.3 and React 19.2.9 for the advisories
-   of 2026-10-14, committed on a separate branch; merge it and rebuild the
-   web image. None of the advisories' preconditions hold in this app (no
-   Server Actions, no `use cache`, no image optimization of untrusted
-   input; an Alpine image published on loopback only), so this is
-   maintenance, not an incident.
+   of 2026-10-14, merged into `main`; rebuild the web image. None of the
+   advisories' preconditions hold in this app (no Server Actions, no
+   `use cache`, no image optimization of untrusted input; an Alpine image
+   published on loopback only), so this is maintenance, not an incident.
 3. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
-   [ticket 005](tickets/005-profile-driven-discovery.md)): implemented and
-   tested on branch `profile-driven-discovery`; the owner's review of
+   [ticket 005](tickets/005-profile-driven-discovery.md)): implemented,
+   tested and merged into `main`, not deployed; the owner's review of
    2026-10-25 found three retry edges, now fixed (see the ticket). The
    three prompts stay drafts until the owner settles their wording.
-   Deploy after ticket 004's acceptance, then a live trial and a two-week
-   side-by-side with the external agent. Then registries, calibration,
-   traces and cost (v4 §24); research stays Slice 2.5 (ADR-011).
+   Before deploying: the full suite on Python 3.12, the version the
+   images run (local runs used 3.14), and the two new budget fields in
+   the private watchlist, which go live together with the new worker
+   because the running one rejects unknown fields. Then a live trial and
+   a two-week side-by-side with the external agent. Then registries,
+   calibration, traces and cost (v4 §24); research stays Slice 2.5
+   (ADR-011).
 
 ## Not yet observed live
 
 JSON_LD_DIRECT_APPLY as the selected entry, the citation-repair step,
-CLOSED reached through a followed page, and watch republication. The
+CLOSED reached through a followed page. The
 watch's first closures (2026-10-19) came from a closed notice cited on
 the rendered page; closure by board absence on two consecutive rechecks,
-missed-run catch-up and overlap skipping have not yet been observed live.
+concurrent decision/closure, missed-run catch-up and overlap skipping
+have not yet been observed live.
+An Ashby republication was recorded on 2026-10-21 without reopening the case.
 Tests cover the case rules; Schedule lifecycle was checked on the real server.
 
 ## Known limits
@@ -57,6 +64,8 @@ Tests cover the case rules; Schedule lifecycle was checked on the real server.
   secondary locations not extracted. Greenhouse postings close only through
   the decision table or approval expiry; candidates left over by the budget
   can age out; Schedule lifecycle has live verification but no automated test.
+  One live Greenhouse discovery reached approval but its company-hosted
+  embed supplied no job body after rendering; it remained UNVERIFIED / WAIT.
 - **Ashby** ([ticket 003](tickets/003-ashby-adapter.md)): a page with no
   text and no JSON-LD stops at NEEDS_MORE_EVIDENCE even when the API says
   OPEN.
