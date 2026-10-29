@@ -12,8 +12,8 @@ idempotent effects and an append-only audit trail, so a result can be
 traced to the page, the rule, the model call and the human decision behind
 it.
 
-**Status:** the core workflow runs on real postings; the scheduled watch is
-in a two-week live acceptance. [Current scope](#current-scope)
+**Status:** the core workflow runs on real postings, and the scheduled
+watch passed its two-week live acceptance. [Current scope](#current-scope)
 lists what is built; [Architecture v4](docs/job-search-agent-architecture-v4.md)
 is the full design, and nothing in it is claimed before its code, tests and
 telemetry exist.
@@ -93,10 +93,10 @@ Implemented (Slice 1 core plus parts of Slice 2):
 - **Ashby API verification.** A posting the board's public API publishes is
   verified without a model call; the page's own closure evidence still wins
   ([ticket 003](docs/tickets/003-ashby-adapter.md)).
-- **Scheduled watch.** Implemented and tested, running live under a two-week
-  acceptance since 2026-10-14: it rechecks cases awaiting a decision and
-  admits new postings from watched Ashby and Greenhouse boards into the same
-  pipeline
+- **Scheduled watch.** Live since 2026-10-14, with its two-week acceptance
+  met on 2026-10-29: it rechecks cases awaiting a decision, closes those
+  whose source shows the posting gone, and admits new postings from
+  watched Ashby and Greenhouse boards into the same pipeline
   ([ADR-016](docs/adr/016-scheduled-watch.md), [ticket 004](docs/tickets/004-scheduled-watch.md)).
 - **Profile-driven discovery.** Implemented and tested, not yet run live: a
   web search that sees only a brief derived from the operator profile, and a

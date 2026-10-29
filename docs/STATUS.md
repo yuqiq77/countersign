@@ -11,23 +11,17 @@ details stay in the gitignored `HANDOFF.md`.
 | Branch | `main`, tracking `origin/main`; the deployment still runs the ticket 004 worker |
 | CI | GitHub Python 3.12.15: 345 tests passed, 3 browser tests skipped (Chromium not configured); static checks and web typecheck/build passed |
 | Slice | Slice 1 and its core live paths verified; release boundary `v0.1.0` |
-| Focus | Ticket 004 two-week core live acceptance verified, with review findings and source-reading limits outstanding; ticket 005 merged, prompt wording pending before deployment |
+| Focus | Ticket 004 closed after its two-week live acceptance, two review findings carried over; ticket 005 merged, prompt wording pending before deployment |
 | Deployed | Ticket 004 watch and ticket 003 final ATS-host line confirmed in the worker; subsequent stored-payload refactor and the grouped case list not rebuilt |
 | In force | `page-reader/0.5.0`, `evaluator/0.3.2` |
 
 ## Next
 
-1. Address ticket 004's two review findings and retain its source-reading
-   limits. Its two-week core live acceptance was verified on 2026-10-29:
-   six calendar ticks, five manual triggers, 20 distinct cases reaching
-   approval, 105 rechecks (88 without model calls), two source closures
-   and one republication, with no recorded recheck failures or budget
-   overrun. The 2026-10-28 tick admitted two new postings without a
-   manual trigger. The private watchlist remains active. The Greenhouse
-   company embed still supplies no job body and stays UNVERIFIED / WAIT.
-   Concurrent decision/closure, board-absence closure, catch-up and
-   overlap paths have no live exercise; available evidence and its
-   retention limits are in the ticket. The ticket is not marked closed.
+1. Ticket 004's two review findings: a recheck not serialized with a
+   concurrent decision, and Ashby secondary locations not extracted. The
+   ticket closed on 2026-10-29 after its two-week live acceptance (results
+   in the ticket), and the private watchlist stays active. Its paths not
+   yet observed live and the Greenhouse reading gap are listed below.
 2. Web dependencies: Next.js 16.4.3 and React 19.2.9 for the advisories
    of 2026-10-14, merged into `main`; rebuild the web image. None of the
    advisories' preconditions hold in this app (no Server Actions, no
