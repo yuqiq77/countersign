@@ -7,59 +7,52 @@ details stay in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-10-29 |
-| Branch | `main`, tracking `origin/main`; the deployment still runs the ticket 004 worker |
-| CI | GitHub Python 3.12.15: 345 tests passed, 3 browser tests skipped (Chromium not configured); static checks and web typecheck/build passed |
+| As of | 2026-11-02 |
+| Branch | `main`, tracking `origin/main`; deployed from `b4b747e` |
+| CI | [GitHub, Python 3.12.15](https://github.com/yuqiq77/countersign/actions/runs/40965745358): 394 tests passed, 3 browser tests skipped (Chromium was not configured); the 3 browser tests passed separately in the Python 3.12.16 runtime image; static checks and web typecheck/build passed |
 | Slice | Slice 1 and its core live paths verified; release boundary `v0.1.0` |
-| Focus | Ticket 004 closed after its two-week live acceptance, two review findings carried over; ticket 005 merged, prompt wording pending before deployment |
-| Deployed | Ticket 004 watch and ticket 003 final ATS-host line confirmed in the worker; subsequent stored-payload refactor and the grouped case list not rebuilt |
-| In force | `page-reader/0.5.0`, `evaluator/0.3.2` |
+| Focus | Ticket 005's live trial: runs completed within budget, but most search admissions were closed or unreadable |
+| Deployed | Ticket 005 on 2026-10-29: API, worker and web rebuilt, schema `0002` applied in place, existing records kept |
+| In force | `page-reader/0.5.0`, `evaluator/0.3.2`; `discovery-{brief,search,screen}/0.1.0` |
 
 ## Next
 
-1. Ticket 004's two review findings: a recheck not serialized with a
-   concurrent decision, and Ashby secondary locations not extracted. The
-   ticket closed on 2026-10-29 after its two-week live acceptance (results
-   in the ticket), and the private watchlist stays active. Its paths not
-   yet observed live and the Greenhouse reading gap are listed below.
-2. Web dependencies: Next.js 16.4.3 and React 19.2.9 for the advisories
-   of 2026-10-14, merged into `main`; rebuild the web image. None of the
-   advisories' preconditions hold in this app (no Server Actions, no
-   `use cache`, no image optimization of untrusted input; an Alpine image
-   published on loopback only), so this is maintenance, not an incident.
-3. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
-   [ticket 005](tickets/005-profile-driven-discovery.md)): implemented,
-   tested and merged into `main`, not deployed; the owner's review of
-   2026-10-25 found three retry edges, now fixed (see the ticket). The
-   three prompts stay drafts until the owner settles their wording.
-   Before deploying: the full suite on Python 3.12, the version the
-   images run (local runs used 3.14), and the two new budget fields in
-   the private watchlist, which go live together with the new worker
-   because the running one rejects unknown fields. Then a live trial and
-   a two-week side-by-side with the external agent. Then registries,
-   calibration, traces and cost (v4 §24); research stays Slice 2.5
-   (ADR-011).
+1. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
+   [ticket 005](tickets/005-profile-driven-discovery.md)), live since
+   2026-10-29: three runs completed without failures, within every budget.
+   Two of the eight search admissions were verified OPEN outside the
+   watched boards; five were closed at verification and one was unreadable.
+   Four returned HTTP 404, so a check before admission could exclude those
+   four (a follow-up ticket is drafted separately). Two passed candidates
+   waited until the next run; one was then verified OPEN and one CLOSED.
+   The queries barely varied between the two calendar runs, a weekend
+   apart. The two-week side-by-side needs a sample of the external
+   agent's report.
+2. Ticket 004's two review findings: a recheck not serialized with a
+   concurrent decision, and Ashby secondary locations not extracted.
+3. Then registries, calibration, traces and cost (v4 §24); research stays
+   Slice 2.5 (ADR-011).
 
 ## Not yet observed live
 
-JSON_LD_DIRECT_APPLY as the selected entry, the citation-repair step,
-CLOSED reached through a followed page. The
-watch's first closures (2026-10-19) came from a closed notice cited on
-the rendered page; closure by board absence on two consecutive rechecks,
-concurrent decision/closure, missed-run catch-up and overlap skipping
-have not yet been observed live.
-An Ashby republication was recorded on 2026-10-21 without reopening the case.
-Tests cover the case rules; Schedule lifecycle was checked on the real server.
+JSON_LD_DIRECT_APPLY as the selected entry, the citation-repair step and
+CLOSED reached through a followed page; for the watch, closure by board
+absence, a decision concurrent with a closure, missed-run catch-up and
+overlap skipping; for discovery, a lead and a URL rejected by the result
+check. Tests cover these rules; the Schedule lifecycle was checked on the
+real server.
 
 ## Known limits
 
-- **Watch** ([ticket 004](tickets/004-scheduled-watch.md)): two open review
-  findings, a recheck not serialized with a concurrent decision and Ashby
-  secondary locations not extracted. Greenhouse postings close only through
-  the decision table or approval expiry; candidates left over by the budget
-  can age out; Schedule lifecycle has live verification but no automated test.
-  One live Greenhouse discovery reached approval but its company-hosted
-  embed supplied no job body after rendering; it remained UNVERIFIED / WAIT.
+- **Discovery** ([ticket 005](tickets/005-profile-driven-discovery.md)):
+  search results can be stale, so dead postings reach admission and close
+  at verification; an aggregator's repost on an ATS host counts as an
+  official ATS posting.
+- **Watch** ([ticket 004](tickets/004-scheduled-watch.md)): the two review
+  findings under Next. Greenhouse postings close only through the decision
+  table or approval expiry; two observed company-page embeds supplied no
+  job body (UNVERIFIED / WAIT). Candidates left over by the budget can age
+  out; the Schedule lifecycle has no automated test.
 - **Ashby** ([ticket 003](tickets/003-ashby-adapter.md)): a page with no
   text and no JSON-LD stops at NEEDS_MORE_EVIDENCE even when the API says
   OPEN.
@@ -77,11 +70,11 @@ Tests cover the case rules; Schedule lifecycle was checked on the real server.
 - **UI:** approvals without an official OPEN and quarantine reasons appear
   only in audit records.
 
-## Owner decisions pending
+## Decisions pending
 
-Rubric and blocker wording, the wording of the three discovery prompts,
-no-profile scoring, official-domain and board policy, public claims, and
-v4 updates for the reader, the evidence loop and ADR-017 (§11 discovery,
-§15 the first model-chosen tool).
-Deferred: structured context effects, stricter cookie matching, evaluator
-replay and generic JS navigation.
+Rubric and blocker wording, revisions of the discovery prompts after the
+trial, a liveness check for search candidates, no-profile scoring,
+official-domain and board policy, public claims, and v4 updates for the
+reader, the evidence loop and ADR-017 (§11 discovery, §15 the first
+model-chosen tool). Deferred: structured context effects, stricter cookie
+matching, evaluator replay and generic JS navigation.

@@ -1,7 +1,6 @@
 # Ticket 005 — Profile-driven discovery: brief, search and screen
 
-- Status: approved (2026-10-22); implemented on branch
-  `profile-driven-discovery`.
+- Status: approved 2026-10-22; deployed 2026-10-29; live trial underway.
 - Slice: Slice 2.
 - Basis: [ADR-017](../adr/017-profile-driven-discovery.md) (accepted
   2026-10-22), [ADR-016](../adr/016-scheduled-watch.md),
@@ -280,9 +279,9 @@ Decided 2026-10-22:
 
 ## Completion record
 
-Implemented 2026-10-22 on branch `profile-driven-discovery`, uncommitted
-for the owner's review: the policy fields and their validation; the
-discovery route; the brief, search and screen calls with draft prompts
+Implemented 2026-10-22 on branch `profile-driven-discovery`, subsequently
+reviewed and merged into `main`: the policy fields and their validation;
+the discovery route; the brief, search and screen calls with draft prompts
 (`gateway/discovery.py`); the terms list with its three gates (admission,
 the reader's RENDER and FOLLOW, render resources); `list_board` parsing
 Ashby's department, team and description head; migration `0002` with
@@ -357,6 +356,44 @@ afterwards), SQLite fixtures elsewhere, Temporal's test server and local
 Chrome. Models and sources were fakes; the only live calls were the probe
 above. Web typecheck and build passed.
 
-Not done: deployment (after ticket 004's acceptance), the live trial, the
-side-by-side script of item 12 (it needs a sample of the external agent's
-report), and the owner's edit of the three prompts.
+Deployed on 2026-10-29 from `b4b747e`, with the first budgets in the
+private watchlist. The business database was backed up and upgraded
+in place from `0001` to `0002`; existing cases, approval pins, decisions
+and waiting workflows were preserved. CI on `b4b747e`
+([run](https://github.com/yuqiq77/countersign/actions/runs/40965745358),
+Python 3.12.15): 394 passed and 3 browser tests skipped, which then
+passed in the runtime image (Python 3.12.16). Read-only checks before
+and after the cutover are kept privately.
+
+Live trial, three runs: a manual trigger on 2026-10-29 and the calendar
+ticks of 2026-10-30 and 2026-11-02. No failure, and every budget held
+(searches 2, 5 and 4 of 6; discovery model calls 5, 8 and 6 of 40).
+
+- **Search.** 11 searches returned 13 candidates in total, nine of them
+  new, every URL among the results; no lead. The first run's query record
+  also held five empty entries, cause not established (no raw response
+  was kept); they have not recurred.
+- **Screen.** Board candidates: five verdicts, two of them DROP for the
+  same design role (screened again after its title changed). Search
+  candidates: nine verdicts, all PASS. No verdict failed open.
+- **Admission** took turns as designed: the search led on 2026-10-30 and
+  filled all five places; the boards led on 2026-11-02.
+- **Outcomes.** of the 11 admitted cases: four live, on-target postings
+  verified OPEN, two of them found by the search on boards the watch does
+  not read. Six search results were already gone or unreadable: five
+  closed at verification without an evaluation (404 or a closed notice),
+  and one hosted Greenhouse URL redirected to the company's home page and
+  was evaluated there.
+
+Findings: five of the eight search admissions were closed at verification,
+and one was unreadable. Two passed search candidates waited from
+2026-10-30 until 2026-11-02; when admitted, one was verified OPEN and the
+other CLOSED. Their status when first queued was not verified. Four of
+the closed search cases returned HTTP 404, which a check before admission
+could have detected. The queries barely varied between the two calendar
+runs, a weekend apart. An aggregator's repost on an ATS host was
+classified as an official ATS posting.
+
+Not done: the two-week side-by-side and the script in item 12 (it needs
+a sample of the external agent's report); a lead and a URL rejection have
+not occurred live. Prompt revisions remain undecided.
