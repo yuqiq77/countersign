@@ -23,6 +23,7 @@ _SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "head"})
 _ATS_HOSTS = (
     "boards.greenhouse.io",
     "job-boards.greenhouse.io",
+    "boards-api.greenhouse.io",
     "jobs.lever.co",
     "jobs.ashbyhq.com",
     "api.ashbyhq.com",

@@ -24,11 +24,12 @@ from countersign.agents.page_reader import (
     read_page,
     reread_unchanged,
 )
-from countersign.capabilities.ats import ashby
+from countersign.capabilities.ats import ashby, greenhouse, is_api_body
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
 from countersign.capabilities.normalize import (
     EXTRACTOR_NAME,
     EXTRACTOR_VERSION,
+    Normalized,
     classify_authority,
     normalize_html,
 )
@@ -127,8 +128,18 @@ def _stored_body_text_chars(session: Session, verification: VerificationResult) 
         if ref is not None and ref.snapshot_id is not None
         else None
     )
-    body = DatabaseBlobStore(session).get(snapshot.raw_object_key) if snapshot else None
-    return None if body is None else len(normalize_html(body).text)
+    if snapshot is None:
+        return None
+    body = DatabaseBlobStore(session).get(snapshot.raw_object_key)
+    return None if body is None else len(_body_text(snapshot.extractor_name, body).text)
+
+
+def _body_text(extractor_name: str, body: bytes) -> Normalized:
+    """A stored body's text, by the extractor its snapshot records: a page's
+    HTML, or an API response, which only the Greenhouse adapter makes a body
+    (ticket 006)."""
+
+    return greenhouse.describe(body) if is_api_body(extractor_name) else normalize_html(body)
 
 
 def _workflow_id() -> str | None:
@@ -283,23 +294,27 @@ def _store_observation(session: Session, case_id: str, obs: Observation) -> str:
 def _adapter_reading(
     first: FetchResult, api: Observation, note: str, authority_of: AuthorityFn
 ) -> ReaderResult:
-    """The reading an official ATS API observation makes without the model (ticket 003).
+    """The reading an official ATS API observation makes without the model (tickets 003, 006).
 
     Observation 0 is the fetched page as the reader observes it and stays
-    the posting body; the apply entry is the API's apply link on
-    observation 1; page dates are added as the reader adds them. The
-    decision table then lets a 404/410 or a past validThrough on the page
-    win over that entry, as it would over a reader's.
+    the posting body, unless a Greenhouse description can stand in for a
+    page that cannot be one: the careers page an embedded board led to, or
+    a page without text. The apply entry is the API's link on observation
+    1; page dates are added as the reader adds them. The decision table
+    then lets a 404/410 or a past validThrough on an official page win over
+    that entry, as it would over a reader's.
     """
 
     page = observe_response(0, first, ObservationHow.STATIC, authority_of)
     observations = [page, api]
     evidence: list[PageEvidence] = []
     add_source_dates(observations, evidence)
+    greenhouse_api = api.extractor_name == greenhouse.ADAPTER_NAME
+    hosted = greenhouse.posting_ref(page.source_url) is not None and bool(page.text)
     (control,) = api.controls
     return ReaderResult(
         observations=observations,
-        body_observation=page.index,
+        body_observation=api.index if greenhouse_api and api.text and not hosted else page.index,
         apply_entry=ApplyEntry(
             kind=ApplyEntryKind.ATS_LINK,
             observation=api.index,
@@ -311,7 +326,7 @@ def _adapter_reading(
         steps=[StepLog(step=0, action=ReaderAction.DONE, outcome=f"adapter {note}")],
         stop_reason=ReaderStop.DONE,
         usage=None,
-        prompt_version=ashby.READING_VERSION,
+        prompt_version=greenhouse.READING_VERSION if greenhouse_api else ashby.READING_VERSION,
     )
 
 
@@ -323,15 +338,17 @@ def _read(
 ) -> tuple[ReaderResult, str | None]:
     """The verify path's reading of a fetched page, with the adapter's note.
 
-    The Ashby API first (ticket 003); on a recheck, the previous reading
-    when the page is unchanged (ticket 004); otherwise the bounded reader.
+    An ATS API first: Ashby's by where the fetch landed (ticket 003),
+    Greenhouse's by any URL on its way (ticket 006). On a recheck, the
+    previous reading when the page is unchanged (ticket 004); otherwise the
+    bounded reader.
     """
 
     started = time.monotonic()
     ats = ashby.lookup(
         first.final_url,
         fetch=lambda url: fetch_url(url, max_body_bytes=ashby.MAX_BOARD_BYTES),
-    )
+    ) or greenhouse.lookup(first, fetch=fetch_url, now=repo.utcnow())
     adapter_note = ats.note if ats is not None else None
     if ats is not None and ats.observation is not None:
         return _adapter_reading(first, ats.observation, ats.note, authority_of), adapter_note
@@ -378,13 +395,20 @@ def _record(
         e.observation == chosen_index and e.kind == EvidenceKind.CLOSED_NOTICE
         for e in result.evidence
     )
-    body_text = result.observations[result.body_observation].text
+    body = result.observations[result.body_observation]
+    body_text = body.text
     first_snapshot = repo.body_snapshot(session, case_id)
-    first_normalized_hash: str | None = None
-    if first_snapshot is not None:
+    content_changed: bool | None = None
+    if first_snapshot is not None and first_snapshot.extractor_name == body.extractor_name:
         first_body = DatabaseBlobStore(session).get(first_snapshot.raw_object_key)
         if first_body is not None:
-            first_normalized_hash = normalize_html(first_body).content_hash
+            first_hash = _body_text(body.extractor_name, first_body).content_hash
+            content_changed = body.normalized_hash != first_hash
+    elif first_snapshot is not None and is_api_body(first_snapshot.extractor_name):
+        # The API's description gave way to a page, as when the API stops
+        # serving the job. The opposite step, a careers page at intake and
+        # the API's description now, has nothing to compare (ticket 006).
+        content_changed = True
 
     refs: list[ObservationRef] = []
     for obs in result.observations:
@@ -423,11 +447,6 @@ def _record(
     )
     repo.record_page_reading(session, reading)
 
-    content_changed = (
-        None
-        if first_normalized_hash is None
-        else result.observations[result.body_observation].normalized_hash != first_normalized_hash
-    )
     landed = sorted({h for o in result.observations if (h := restricted_host(o.source_url))})
     if landed and reason not in (BOARD_ABSENCE, BOARD_ABSENCE_AGAIN):
         # The fetch followed a redirect onto such a host (ADR-017); the
@@ -481,7 +500,8 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
     publishes it with an apply link, that observation carries the entry and
     code makes the reading without the model; otherwise the reader runs as
     before, within what remains of the same budget, and the reading records
-    what the API attempt found.
+    what the API attempt found. A hosted Greenhouse posting on the fetch's
+    way is looked up the same way in its Job Board API (ticket 006).
 
     Transient fetch errors on the primary observation and provider outages
     propagate so Temporal's retry policy fires; failures on followed links
@@ -523,6 +543,17 @@ def verify_status(payload: CaseWorkflowInput) -> VerifyOutcome:
             status=status,
             reason=reason,
         )
+        body = result.observations[result.body_observation]
+        if is_api_body(body.extractor_name) and body.title:
+            # Intake titled the case from the page the posting led to, a
+            # careers page here; the API names the job (ticket 006).
+            case = repo.get_case(session, payload.case_id)
+            repo.set_case_facts(
+                session,
+                case_id=payload.case_id,
+                title=body.title,
+                company_hint=body.company_hint or (case.company_hint if case else None),
+            )
         repo.transition_case(
             session,
             case_id=payload.case_id,
@@ -693,7 +724,7 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             if payload.generation > 1
             else None
         )
-    normalized = normalize_html(body)
+    normalized = _body_text(snapshot.extractor_name, body)
 
     # Marks the activity attempt only; the provider-boundary lines live in
     # the gateway, and the request id below is the evidence a request landed.
@@ -703,7 +734,8 @@ def evaluate_case(payload: CaseWorkflowInput) -> EvaluateOutcome:
             resolve_provider(),
             case_id=payload.case_id,
             content_hash=normalized.content_hash,
-            url=snapshot.final_url,
+            # An API response's URL names an endpoint, not the posting.
+            url=payload.url if is_api_body(snapshot.extractor_name) else snapshot.final_url,
             title=normalized.title or title,
             text=normalized.text,
             verification=verification,

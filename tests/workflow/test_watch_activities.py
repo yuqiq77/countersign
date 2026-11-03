@@ -54,8 +54,8 @@ from countersign.persistence.models import AuditEventRow
 NOW = datetime.now(UTC)
 DAY = timedelta(days=1)
 FUTURE = "2099-12-31T00:00:00Z"
-GREENHOUSE_URL = "https://job-boards.greenhouse.io/globex/jobs/4001"
-APPLY_URL = f"{GREENHOUSE_URL}#app"
+PAGE_URL = "https://jobs.lever.co/globex/4001"
+APPLY_URL = f"{PAGE_URL}#app"
 JOB_ID = "4c1d7e2a-5b6f-4a8e-9d3c-2b1a0f9e8d7c"
 ASHBY_URL = f"https://jobs.ashbyhq.com/acme/{JOB_ID}"
 ASHBY_API = "https://api.ashbyhq.com/posting-api/job-board/acme"
@@ -93,7 +93,7 @@ def _network(routes: dict[str, tuple[int, bytes]]) -> Callable[..., FetchResult]
     return fetch
 
 
-def _greenhouse_page(valid_through: str, apply_href: str = APPLY_URL) -> bytes:
+def _posting_page(valid_through: str, apply_href: str = APPLY_URL) -> bytes:
     posting = {
         "@context": "https://schema.org",
         "@type": "JobPosting",
@@ -188,11 +188,11 @@ def _pending(url: str) -> str:
     return payload.case_id
 
 
-def _greenhouse_case(monkeypatch: pytest.MonkeyPatch, valid_through: str) -> str:
-    page = _greenhouse_page(valid_through)
-    monkeypatch.setattr(case_activities, "fetch_url", _network({GREENHOUSE_URL: (200, page)}))
+def _page_case(monkeypatch: pytest.MonkeyPatch, valid_through: str) -> str:
+    page = _posting_page(valid_through)
+    monkeypatch.setattr(case_activities, "fetch_url", _network({PAGE_URL: (200, page)}))
     monkeypatch.setattr(case_activities, "resolve_provider", _reads_apply)
-    return _pending(GREENHOUSE_URL)
+    return _pending(PAGE_URL)
 
 
 def _ashby_case(monkeypatch: pytest.MonkeyPatch) -> str:
@@ -217,11 +217,11 @@ def test_an_unchanged_page_whose_deadline_passed_is_expired_without_the_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     valid_through = (NOW + DAY).isoformat(timespec="seconds")
-    case_id = _greenhouse_case(monkeypatch, valid_through)
+    case_id = _page_case(monkeypatch, valid_through)
     monkeypatch.setattr(repo, "utcnow", lambda: NOW + 2 * DAY)
     monkeypatch.setattr(case_activities, "resolve_provider", _no_model)
 
-    assert case_activities.recheck_case(_recheck(case_id, GREENHOUSE_URL)) == RecheckOutcome(
+    assert case_activities.recheck_case(_recheck(case_id, PAGE_URL)) == RecheckOutcome(
         recorded=True,
         model_calls=0,
         status=JobStatus.EXPIRED,
@@ -233,13 +233,13 @@ def test_an_unchanged_page_whose_deadline_passed_is_expired_without_the_model(
 def test_a_changed_apply_target_under_unchanged_text_runs_the_reader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    case_id = _greenhouse_case(monkeypatch, FUTURE)
-    moved = _greenhouse_page(FUTURE, apply_href=f"{GREENHOUSE_URL}/apply-elsewhere")
-    monkeypatch.setattr(case_activities, "fetch_url", _network({GREENHOUSE_URL: (200, moved)}))
+    case_id = _page_case(monkeypatch, FUTURE)
+    moved = _posting_page(FUTURE, apply_href=f"{PAGE_URL}/apply-elsewhere")
+    monkeypatch.setattr(case_activities, "fetch_url", _network({PAGE_URL: (200, moved)}))
     reader = FakeEvaluationProvider()
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: reader)
 
-    outcome = case_activities.recheck_case(_recheck(case_id, GREENHOUSE_URL))
+    outcome = case_activities.recheck_case(_recheck(case_id, PAGE_URL))
     assert (reader.calls, outcome.model_calls) == (1, 1)
 
 
@@ -250,21 +250,21 @@ def test_a_retried_recheck_whose_reading_asked_a_model_is_charged_its_worst_case
     """A reading whose model calls all failed validation is stored without
     usage; the retry of its Activity must not credit those calls back."""
 
-    case_id = _greenhouse_case(monkeypatch, FUTURE)
-    moved = _greenhouse_page(FUTURE, apply_href=f"{GREENHOUSE_URL}/apply-elsewhere")
-    monkeypatch.setattr(case_activities, "fetch_url", _network({GREENHOUSE_URL: (200, moved)}))
+    case_id = _page_case(monkeypatch, FUTURE)
+    moved = _posting_page(FUTURE, apply_href=f"{PAGE_URL}/apply-elsewhere")
+    monkeypatch.setattr(case_activities, "fetch_url", _network({PAGE_URL: (200, moved)}))
     reader = FakeEvaluationProvider(fail_attempts=99)
     monkeypatch.setattr(case_activities, "resolve_provider", lambda: reader)
 
-    first = case_activities.recheck_case(_recheck(case_id, GREENHOUSE_URL))
-    retried = case_activities.recheck_case(_recheck(case_id, GREENHOUSE_URL))
+    first = case_activities.recheck_case(_recheck(case_id, PAGE_URL))
+    retried = case_activities.recheck_case(_recheck(case_id, PAGE_URL))
     assert (reader.calls, first.model_calls) == (2, 2)
     assert retried.model_calls == RECHECK_MODEL_CALLS
 
 
 @pytest.mark.usefixtures("db")
 def test_a_recheck_after_the_decision_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    case_id = _greenhouse_case(monkeypatch, FUTURE)
+    case_id = _page_case(monkeypatch, FUTURE)
     case_activities.finalize_decision(
         DecisionSignal(
             approval_request_id=ids.approval_request_id(case_id, 1),
@@ -275,7 +275,7 @@ def test_a_recheck_after_the_decision_writes_nothing(monkeypatch: pytest.MonkeyP
         )
     )
 
-    outcome = case_activities.recheck_case(_recheck(case_id, GREENHOUSE_URL))
+    outcome = case_activities.recheck_case(_recheck(case_id, PAGE_URL))
     assert outcome == RecheckOutcome(recorded=False, model_calls=0)
     with session_scope() as session:
         assert repo.get_verification(session, ids.recheck_verification_id(case_id, 1, "r1")) is None
@@ -398,7 +398,11 @@ def test_a_closed_posting_listed_again_after_its_closure_is_recorded_once(
 
     returned, stayed = (f"https://job-boards.greenhouse.io/globex/jobs/{n}" for n in (201, 202))
     gone = (404, b"<html><body><h1>Job not found</h1></body></html>")
-    monkeypatch.setattr(case_activities, "fetch_url", _network({returned: gone, stayed: gone}))
+    # Taken down, the jobs are not served by the API either (ticket 006).
+    not_served = (404, b'{"status": 404, "error": "Job not found"}')
+    routes: dict[str, tuple[int, bytes]] = {returned: gone, stayed: gone}
+    routes.update({f"{GREENHOUSE_API}/{n}": not_served for n in (201, 202)})
+    monkeypatch.setattr(case_activities, "fetch_url", _network(routes))
     monkeypatch.setattr(case_activities, "resolve_provider", FakeEvaluationProvider)
     case_ids: list[str] = []
     for url in (returned, stayed):

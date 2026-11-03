@@ -24,10 +24,14 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from countersign.agents.page_reader import ReaderConfig, read_page
+from countersign.capabilities.ats import is_api_body
 from countersign.capabilities.http_fetch import FetchPolicyError, FetchResult, fetch_url
 from countersign.capabilities.normalize import classify_authority
 from countersign.capabilities.render import render_url
+from countersign.contracts.provenance import SnapshotRecord
 from countersign.domain.verification import classify_reading
 from countersign.gateway.evaluator import resolve_provider
 from countersign.gateway.provider import StructuredProvider
@@ -45,6 +49,18 @@ def _no_render(url: str, body: bytes, timeout: float) -> FetchResult | None:
     return None
 
 
+def _posting_page(session: Session, case_id: str) -> SnapshotRecord | None:
+    """A case's posting body, or its reading's fetched page when the body
+    is an API response, which is not a page (ticket 006)."""
+
+    body = repo.body_snapshot(session, case_id)
+    if body is None or not is_api_body(body.extractor_name):
+        return body
+    reading = repo.latest_page_reading(session, case_id)
+    page = reading.observations[0] if reading is not None else None
+    return repo.get_snapshot(session, page.snapshot_id) if page and page.snapshot_id else None
+
+
 def replay(
     reference: str,
     *,
@@ -56,7 +72,7 @@ def replay(
     """Run the reader over a stored snapshot (by id) or a case's posting body."""
 
     with session_scope() as session:
-        snapshot = repo.get_snapshot(session, reference) or repo.body_snapshot(session, reference)
+        snapshot = repo.get_snapshot(session, reference) or _posting_page(session, reference)
         if snapshot is None:
             raise SystemExit(f"no snapshot or case {reference!r}")
         body = DatabaseBlobStore(session).get(snapshot.raw_object_key)

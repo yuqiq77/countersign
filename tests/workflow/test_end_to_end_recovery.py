@@ -89,7 +89,7 @@ def fake_network(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
                             kind=ApplyEntryKind.APPLY_CONTROL,
                             cited_text="Apply for this job",
                             observation=0,
-                            href="https://boards.greenhouse.io/apply",
+                            href="https://jobs.lever.co/apply",
                         ),
                     ),
                 )
@@ -567,6 +567,8 @@ async def test_empty_page_stops_before_the_model(monkeypatch: pytest.MonkeyPatch
         )
 
     monkeypatch.setattr(case_activities, "fetch_url", empty_fetch)
+    # The step-0 pre-render would otherwise load the real host when Chrome is set.
+    monkeypatch.setattr(case_activities, "render_url", _render_unavailable)
     monkeypatch.setenv("COUNTERSIGN_MODEL_PROVIDER", "fake")
 
     queue = f"e2e-{uuid.uuid4()}"
@@ -611,7 +613,7 @@ COMPANY_HTML = b"""
 <html><body>
   <h1>Platform Engineer</h1>
   <p>Read the full posting and apply on our applicant portal.</p>
-  <a href="https://boards.greenhouse.io/acme/jobs/1">See full posting</a>
+  <a href="https://jobs.lever.co/acme/1">See full posting</a>
 </body></html>
 """
 
@@ -661,7 +663,7 @@ async def test_reader_follows_a_company_page_to_its_ats_posting(
                         kind=ApplyEntryKind.APPLY_CONTROL,
                         cited_text="Apply for this job",
                         observation=1,
-                        href="https://boards.greenhouse.io/apply",
+                        href="https://jobs.lever.co/apply",
                     ),
                 ),
             ),

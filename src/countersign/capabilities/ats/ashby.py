@@ -26,7 +26,14 @@ from urllib.parse import quote, unquote, urlparse
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
-from countersign.capabilities.ats import BoardListing, ListedPosting, fetch_board
+from countersign.capabilities.ats import (
+    ADAPTER_PREFIX,
+    BoardListing,
+    ListedPosting,
+    Unavailable,
+    fetch_board,
+    leaves_segment,
+)
 from countersign.capabilities.http_fetch import FetchResult
 from countersign.capabilities.normalize import host_of
 from countersign.capabilities.page_evidence import Observation
@@ -40,7 +47,7 @@ API_HOST = "api.ashbyhq.com"
 MAX_BOARD_BYTES = 8_000_000
 # The head of a posting's plain description the coarse screen reads (ADR-017).
 EXCERPT_CHARS = 1_500
-ADAPTER_NAME = "ats-adapter/ashby"
+ADAPTER_NAME = f"{ADAPTER_PREFIX}ashby"
 ADAPTER_VERSION = "0.1.0"
 # Stands where a reader's prompt version would on the reading it makes.
 READING_VERSION = f"{ADAPTER_NAME}/{ADAPTER_VERSION}"
@@ -130,9 +137,7 @@ def posting_ref(url: str) -> tuple[str, str] | None:
     if host_of(url) != BOARD_HOST:
         return None
     segments = [s for s in urlparse(url).path.split("/") if s]
-    # The board becomes a segment of the API path; a dot segment, encoded
-    # or not, would leave it.
-    if len(segments) < 2 or unquote(segments[0]) in (".", ".."):
+    if len(segments) < 2 or leaves_segment(segments[0]):
         return None
     return segments[0], segments[1]
 
@@ -149,11 +154,14 @@ def lookup(page_url: str, *, fetch: Callable[[str], FetchResult]) -> AshbyLookup
     if ref is None:
         return None
     board, job_id = ref
+    # The board's own name, quoted afresh: the URL's encoding never reaches the path.
     response = fetch_board(
-        f"https://{API_HOST}/posting-api/job-board/{board}", api_host=API_HOST, fetch=fetch
+        f"https://{API_HOST}/posting-api/job-board/{quote(unquote(board), safe='')}",
+        api_host=API_HOST,
+        fetch=fetch,
     )
-    if isinstance(response, str):
-        return AshbyLookup(f"ashby: {response}")
+    if isinstance(response, Unavailable):
+        return AshbyLookup(f"ashby: {response.note}")
     try:
         postings = _Board.model_validate_json(response.body).jobs
     except ValidationError:
@@ -186,8 +194,8 @@ def list_board(board: str, *, fetch: Callable[[str], FetchResult]) -> BoardListi
         api_host=API_HOST,
         fetch=fetch,
     )
-    if isinstance(response, str):
-        return BoardListing(response)
+    if isinstance(response, Unavailable):
+        return BoardListing(response.note)
     try:
         jobs = _Listing.model_validate_json(response.body).jobs
     except ValidationError:

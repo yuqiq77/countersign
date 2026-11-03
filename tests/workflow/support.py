@@ -17,7 +17,7 @@ from countersign.contracts.workflow_io import (
 from countersign.runtime import workflow_id_for
 from countersign.workflows.job_case import JobIntelligenceWorkflow
 
-JOB_URL = "https://boards.greenhouse.io/acme/jobs/1"
+JOB_URL = "https://jobs.lever.co/acme/1"
 
 
 def client_rendered_posting(valid_through: str = "2099-12-31T00:00:00Z") -> bytes:

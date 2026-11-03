@@ -93,6 +93,9 @@ def test_a_posting_url_names_its_board_and_job(url: str) -> None:
         f"https://careers.acme.example/jobs.ashbyhq.com/acme/{JOB_ID}",
         f"https://jobs.ashbyhq.com/../acme/{JOB_ID}",
         f"https://jobs.ashbyhq.com/%2E%2E/{JOB_ID}",
+        # An encoded slash would carry the API path elsewhere on its host (ticket 006).
+        f"https://jobs.ashbyhq.com/x%2F..%2Fother/{JOB_ID}",
+        f"https://jobs.ashbyhq.com/x%5C..%5Cother/{JOB_ID}",
     ],
 )
 def test_other_urls_never_reach_the_api(url: str) -> None:
@@ -135,6 +138,14 @@ def test_a_published_posting_is_an_official_api_observation(listed: bool, note: 
         ashby.ADAPTER_NAME,
         ashby.ADAPTER_VERSION,
     )
+
+
+def test_the_api_path_carries_the_board_quoted_afresh() -> None:
+    url = f"https://jobs.ashbyhq.com/ac:me/{JOB_ID}"
+    seen: list[str] = []
+    result = ashby.lookup(url, fetch=_api(_serving(_board(_posting(jobUrl=url))), seen))
+    assert seen == ["https://api.ashbyhq.com/posting-api/job-board/ac%3Ame"]
+    assert result is not None and result.note == "ashby: published"
 
 
 def test_the_posting_matches_regardless_of_case() -> None:
