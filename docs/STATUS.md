@@ -7,7 +7,7 @@ details stay in the gitignored `HANDOFF.md`.
 
 | Field | Value |
 | --- | --- |
-| As of | 2026-11-02 |
+| As of | 2026-11-03 |
 | Branch | `main`, tracking `origin/main`; deployed from `b4b747e` |
 | CI | [GitHub, Python 3.12.15](https://github.com/yuqiq77/countersign/actions/runs/40965745358): 394 tests passed, 3 browser tests skipped (Chromium was not configured); the 3 browser tests passed separately in the Python 3.12.16 runtime image; static checks and web typecheck/build passed |
 | Slice | Slice 1 and its core live paths verified; release boundary `v0.1.0` |
@@ -17,7 +17,12 @@ details stay in the gitignored `HANDOFF.md`.
 
 ## Next
 
-1. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
+1. Greenhouse Job Board API ([ticket 006](tickets/006-greenhouse-adapter.md)):
+   implemented, not deployed. Once deployed, a hosted Greenhouse posting
+   verifies OPEN from the API without a model call, one embedded on a
+   company page is evaluated on the API's description, and the watch skips
+   prospect posts.
+2. Profile-driven discovery ([ADR-017](adr/017-profile-driven-discovery.md),
    [ticket 005](tickets/005-profile-driven-discovery.md)), live since
    2026-10-29: three runs completed without failures, within every budget.
    Two of the eight search admissions were verified OPEN outside the
@@ -28,9 +33,9 @@ details stay in the gitignored `HANDOFF.md`.
    The queries barely varied between the two calendar runs, a weekend
    apart. The two-week side-by-side needs a sample of the external
    agent's report.
-2. Ticket 004's two review findings: a recheck not serialized with a
+3. Ticket 004's two review findings: a recheck not serialized with a
    concurrent decision, and Ashby secondary locations not extracted.
-3. Then registries, calibration, traces and cost (v4 §24); research stays
+4. Then registries, calibration, traces and cost (v4 §24); research stays
    Slice 2.5 (ADR-011).
 
 ## Not yet observed live
@@ -51,8 +56,9 @@ real server.
 - **Watch** ([ticket 004](tickets/004-scheduled-watch.md)): the two review
   findings under Next. Greenhouse postings close only through the decision
   table or approval expiry; two observed company-page embeds supplied no
-  job body (UNVERIFIED / WAIT). Candidates left over by the budget can age
-  out; the Schedule lifecycle has no automated test.
+  job body (UNVERIFIED / WAIT), which ticket 006 addresses once deployed.
+  Candidates left over by the budget can age out; the Schedule lifecycle
+  has no automated test.
 - **Ashby** ([ticket 003](tickets/003-ashby-adapter.md)): a page with no
   text and no JSON-LD stops at NEEDS_MORE_EVIDENCE even when the API says
   OPEN.
